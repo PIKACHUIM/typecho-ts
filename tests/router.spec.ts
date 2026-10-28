@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Router } from '../src/core/router';
+import { SiteOptions } from '../src/core/options';
+import { buildRequestContext, pathInfoFromUrl } from '../src/core/request';
 import { DEFAULT_ROUTING_TABLE } from './helpers/render-theme';
 import { subStr, url, fixHtml } from '../src/core/common';
 
@@ -38,6 +40,23 @@ describe('Router (Typecho routing table port)', () => {
 
   it('leaves unknown params as placeholders', () => {
     expect(router.url('post', null, 'http://example.com')).toBe('http://example.com/archives/{cid}/');
+  });
+});
+
+describe('SiteOptions permalink rewrite mode', () => {
+  it('treats a stored string 0 as disabled and keeps index.php in post and feed URLs', () => {
+    const root = 'https://example.test';
+    const request = buildRequestContext(new Request(`${root}/`));
+    for (const rewrite of ['0', 0, false]) {
+      const options = new SiteOptions({ values: { rewrite, routingTable: DEFAULT_ROUTING_TABLE }, request, echo: () => undefined });
+      expect(options.derived.index).toBe(`${root}/index.php`);
+      expect(options.derived.feedUrl).toBe(`${root}/index.php/feed/`);
+      const post = options.router.url('post', { cid: '42' }, options.derived.index);
+      expect(post).toBe(`${root}/index.php/archives/42/`);
+      expect(options.router.match(pathInfoFromUrl(new URL(post)))?.route.name).toBe('post');
+    }
+    const rewritten = new SiteOptions({ values: { rewrite: '1', routingTable: DEFAULT_ROUTING_TABLE }, request, echo: () => undefined });
+    expect(rewritten.derived.index).toBe(root);
   });
 });
 

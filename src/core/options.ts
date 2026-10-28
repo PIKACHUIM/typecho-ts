@@ -1,6 +1,6 @@
 import { PHP_HOST, type PhpHost } from '../../php-compat/host';
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
-import { PhpArray } from '../../php-compat/values';
+import { PhpArray, truthy } from '../../php-compat/values';
 import { parsePhpSerialized } from '../../php-compat/serialize';
 import { buildUrl, url as joinUrl } from './common';
 import type { Db } from './db';
@@ -92,7 +92,7 @@ export class SiteOptions implements PhpHost {
     if (this.request.isSecure && siteUrl.startsWith('http://')) {
       siteUrl = `https://${siteUrl.slice(7)}`;
     }
-    const index = this.values.rewrite ? rootUrl : joinUrl('index.php', rootUrl);
+    const index = truthy(this.values.rewrite) ? rootUrl : joinUrl('index.php', rootUrl);
     const theme = this.values.theme ?? 'default';
     const themeUrl = joinUrl(`/usr/themes/${theme}`, siteUrl);
     const adminUrl = joinUrl('/admin/', rootUrl);
