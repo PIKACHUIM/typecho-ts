@@ -30,6 +30,7 @@ VALUES (1, 1, 1700000500, 'Alice', 0, 0, 'alice@example.com', NULL, '127.0.0.1',
 INSERT INTO typecho_options (name, "user", value) VALUES
  ('installed', 0, '1'),
  ('theme', 0, 'default'),
+ ('defaultCategory', 0, '1'),
  ('title', 0, 'Typecho Work'),
  ('description', 0, 'Typecho on Cloudflare Workers'),
  ('rewrite', 0, '1'),

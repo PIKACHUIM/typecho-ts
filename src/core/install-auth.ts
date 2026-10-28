@@ -45,6 +45,7 @@ const DEFAULT_ROUTES = {
 
 const INSTALL_OPTIONS: Array<[string, string]> = [
   ['theme', 'default'],
+  ['defaultCategory', '1'],
   ['rewrite', '1'],
   ['pageSize', '10'],
   ['postsListSize', '5'],
