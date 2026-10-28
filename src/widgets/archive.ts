@@ -55,6 +55,7 @@ export class Archive implements PhpHost {
   archiveType: ArchiveKind = 'index';
   archiveSlug = '';
   archiveSingle = false;
+  notFound = false;
   archiveUrl = '';
   titleText = '';
   archiveDescription = '';
@@ -101,7 +102,7 @@ export class Archive implements PhpHost {
       const frontPage = String(this.options.get('frontPage') ?? '');
       if (frontPage.startsWith('page:')) {
         const cid = Number(frontPage.slice(5));
-        await this.loadSingle({ cid });
+        await this.loadSingle({ cid, type: 'page' });
         this.makeSinglePageAsFrontPage = true;
         return;
       }
@@ -111,12 +112,12 @@ export class Archive implements PhpHost {
     }
 
     if (route === 'post' || route === 'attachment') {
-      await this.loadSingle({ cid: Number(this.params.cid) });
+      await this.loadSingle({ cid: Number(this.params.cid), type: route });
       return;
     }
 
     if (route === 'page') {
-      await this.loadSingle(this.params.cid ? { cid: Number(this.params.cid) } : { slug: this.params.slug ?? '' });
+      await this.loadSingle(this.params.cid ? { cid: Number(this.params.cid), type: 'page' } : { slug: this.params.slug ?? '', type: 'page' });
       return;
     }
 
@@ -126,6 +127,7 @@ export class Archive implements PhpHost {
       this.archiveSlug = slug;
       const metas = await listCategories(this.db);
       const meta = metas.find((m) => m.slug === slug);
+      if (!meta) this.notFound = true;
       this.titleText = meta?.name ?? '';
       this.archiveDescription = meta?.description ?? '';
       this.archiveUrl = this.options.router.url(route, { slug, page: String(this.currentPage) }, this.options.derived.index);
@@ -138,6 +140,7 @@ export class Archive implements PhpHost {
       this.archiveSlug = slug;
       const metas = await listTags(this.db);
       const meta = metas.find((m) => m.slug === slug);
+      if (!meta) this.notFound = true;
       this.titleText = meta?.name ?? '';
       this.archiveUrl = this.options.router.url(route, { slug, page: String(this.currentPage) }, this.options.derived.index);
       return;
@@ -148,17 +151,25 @@ export class Archive implements PhpHost {
       await this.loadList({ authorId: uid }, 'author');
       this.archiveSlug = String(uid);
       const user = await findUser(this.db, uid);
+      if (!user) this.notFound = true;
       this.titleText = user?.screenName || user?.name || '';
       this.archiveUrl = this.options.router.url(route, { uid: String(uid), page: String(this.currentPage) }, this.options.derived.index);
       return;
     }
 
     if (route === 'search' || route === 'search_page') {
-      const keywords = this.params.keywords ?? '';
+      const encodedKeywords = this.params.keywords ?? '';
+      let keywords: string;
+      try {
+        keywords = decodeURIComponent(encodedKeywords);
+      } catch {
+        this.notFound = true;
+        return;
+      }
       await this.loadList({ keywords }, 'search');
       this.archiveSlug = keywords;
       this.titleText = keywords;
-      this.archiveUrl = this.options.router.url(route, { keywords, page: String(this.currentPage) }, this.options.derived.index);
+      this.archiveUrl = this.options.router.url(route, { keywords: encodedKeywords, page: String(this.currentPage) }, this.options.derived.index);
       return;
     }
 
@@ -172,8 +183,13 @@ export class Archive implements PhpHost {
       return;
     }
 
-    // `archive` / unknown routes behave like an empty archive listing
-    await this.loadList({}, 'archive');
+    if ((route === 'archive' || route === 'archive_page') && String(this.options.get('frontPage') ?? '') !== 'recent' && Number(this.options.get('frontArchive')) === 1) {
+      await this.loadList({ type: 'post' }, 'front');
+      this.archiveUrl = this.options.router.url(route, { page: String(this.currentPage) }, this.options.derived.index);
+      return;
+    }
+
+    this.notFound = true;
   }
 
   private async loadList(query: Parameters<typeof listContents>[1], kind: ArchiveKind): Promise<void> {
@@ -183,15 +199,17 @@ export class Archive implements PhpHost {
     const offset = (this.currentPage - 1) * limit;
     this.posts = await listContents(this.db, { ...query, limit, offset });
     this.total = await countContents(this.db, query);
+    if (this.currentPage > 1 && this.posts.length === 0) this.notFound = true;
     this.index = -1;
     this.currentRow = null;
   }
 
-  private async loadSingle(filter: { cid?: number; slug?: string }): Promise<void> {
+  private async loadSingle(filter: { cid?: number; slug?: string; type: 'post' | 'page' | 'attachment' }): Promise<void> {
     const row = await findContent(this.db, filter);
     if (!row) {
       this.posts = [];
       this.total = 0;
+      this.notFound = true;
       return;
     }
     this.posts = [row];
@@ -205,7 +223,7 @@ export class Archive implements PhpHost {
     const router = this.options.router;
     const routeName = row.type === 'page' ? 'page' : row.type === 'attachment' ? 'attachment' : 'post';
     this.archiveUrl = router.url(routeName, row.type === 'page' ? { slug: row.slug ?? '' } : { cid: String(row.cid) }, this.options.derived.index);
-    this.themeFile = row.template ? `${row.template}.php` : '';
+    this.themeFile = row.template && /^[a-zA-Z0-9_-]+\.php$/.test(row.template) ? row.template : '';
     if (row.type === 'post' || row.type === 'page' || row.type === 'attachment') {
       this.titleText = row.title ?? '';
     }
@@ -422,7 +440,7 @@ export class Archive implements PhpHost {
       const defined = defines.get(this.archiveType);
       if (defined) template = String(defined);
     }
-    const title = String(this.titleText ?? '');
+    const title = this.archiveType === 'search' ? escapeHtml(this.titleText) : String(this.titleText ?? '');
     this.echo(`${String(before)}${template.replace('%s', title)}${String(end)}`);
   }
 
@@ -447,7 +465,7 @@ export class Archive implements PhpHost {
       social: '1',
     };
     const allowFeed = !this.is('single') || (await this.allow('feed')) || this.makeSinglePageAsFrontPage;
-    const title = `${this.titleText ? `${this.titleText} &raquo; ` : ''}${o.text('title')}`;
+    const title = `${this.titleText ? `${escapeHtml(this.titleText)} &raquo; ` : ''}${escapeHtml(o.text('title'))}`;
 
     let header = '';
     if (this.is('single') && !this.is('index')) header += `<link rel="canonical" href="${this.archiveUrl}" />\n`;
@@ -560,13 +578,13 @@ export class Archive implements PhpHost {
     if (!row) return null;
     if (direction === 'prev') {
       return this.db.first<ContentRow>(
-        `SELECT * FROM table.contents WHERE type = 'post' AND status = 'publish' AND created < ? ORDER BY created DESC LIMIT 1`,
-        [row.created]
+        `SELECT * FROM table.contents WHERE type = 'post' AND status = 'publish' AND created < ? AND (password IS NULL OR password = '') ORDER BY created DESC LIMIT 1`,
+        [Math.min(row.created, Math.floor(Date.now() / 1000))]
       );
     }
     return this.db.first<ContentRow>(
-      `SELECT * FROM table.contents WHERE type = 'post' AND status = 'publish' AND created > ? ORDER BY created ASC LIMIT 1`,
-      [row.created]
+      `SELECT * FROM table.contents WHERE type = 'post' AND status = 'publish' AND created > ? AND created < ? AND (password IS NULL OR password = '') ORDER BY created ASC LIMIT 1`,
+      [row.created, Math.floor(Date.now() / 1000)]
     );
   }
 
@@ -687,22 +705,31 @@ export class Archive implements PhpHost {
   }
 
   private userHost(): PhpHost {
+    const user = this.options.currentUser;
+    const groups = ['administrator', 'editor', 'contributor', 'subscriber', 'visitor'] as const;
+    const pass = (group: unknown): boolean => {
+      const actual = groups.indexOf(user?.group as (typeof groups)[number]);
+      const required = groups.indexOf(String(group) as (typeof groups)[number]);
+      return actual >= 0 && required >= 0 && actual <= required;
+    };
     return {
       [PHP_HOST]: true as const,
       phpGet: (name: string) => {
-        if (name === 'uid') return 0;
-        if (name === 'hasLogin') return false;
-        if (name === 'pass') return () => false;
+        if (name === 'uid') return user?.uid ?? 0;
+        if (name === 'hasLogin') return user !== null;
+        if (name === 'pass') return pass;
+        if (name === 'name' || name === 'screenName' || name === 'mail' || name === 'group') return escapeHtml(user?.[name] ?? '');
         return null;
       },
-      phpCall: (name: string) => {
-        if (name === 'hasLogin' || name === 'pass') return false;
-        if (name === 'screenName' || name === 'name') {
-          this.echo('');
+      phpCall: (name: string, args: unknown[]) => {
+        if (name === 'hasLogin') return user !== null;
+        if (name === 'pass') return pass(args[0]);
+        if (name === 'screenName' || name === 'name' || name === 'mail' || name === 'group') {
+          this.echo(escapeHtml(user?.[name] ?? ''));
           return undefined;
         }
         if (name === 'permalink') {
-          this.echo(this.options.derived.siteUrl);
+          this.echo(user ? this.options.router.url('author', { uid: String(user.uid) }, this.options.derived.index) : this.options.derived.siteUrl);
           return undefined;
         }
         return undefined;

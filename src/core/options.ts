@@ -1,5 +1,5 @@
-import { md5 } from '../../php-compat/md5';
 import { PHP_HOST, type PhpHost } from '../../php-compat/host';
+import { findCurrentUser, securityToken, type AuthUser } from './auth';
 import { PhpArray } from '../../php-compat/values';
 import { buildUrl, url as joinUrl } from './common';
 import type { Db } from './db';
@@ -50,6 +50,7 @@ export interface SiteOptionsInit {
   request: RequestContext;
   echo: (value: unknown) => void;
   siteUrl?: string;
+  user?: AuthUser | null;
 }
 
 /**
@@ -63,11 +64,13 @@ export class SiteOptions implements PhpHost {
   readonly router: Router;
   readonly derived: Record<string, any>;
   private readonly echo: (value: unknown) => void;
+  private readonly user: AuthUser | null;
 
   constructor(init: SiteOptionsInit) {
     this.values = init.values;
     this.request = init.request;
     this.echo = init.echo;
+    this.user = init.user ?? null;
     this.router = getRouter((init.values.routingTable ?? {}) as Record<string, any>);
     this.derived = this.computeDerived(init.siteUrl);
   }
@@ -85,6 +88,7 @@ export class SiteOptions implements PhpHost {
     const adminUrl = joinUrl('/admin/', rootUrl);
     const pluginUrl = joinUrl('/usr/plugins', siteUrl);
     const secret = String(this.values.secret ?? '');
+    const tokenSuffix = `${this.request.url.origin}${this.request.url.pathname}${this.request.url.search}`;
 
     return {
       rootUrl,
@@ -105,7 +109,7 @@ export class SiteOptions implements PhpHost {
       commentsFeedRssUrl: this.router.url('feed', { feed: '/rss/comments/' }, index),
       commentsFeedAtomUrl: this.router.url('feed', { feed: '/atom/comments/' }, index),
       xmlRpcUrl: this.router.url('do', { action: 'xmlrpc' }, index),
-      logoutUrl: this.tokenUrl(joinUrl('/action/logout', index), secret),
+      logoutUrl: this.tokenUrl(joinUrl('/action/logout', rootUrl), secret, tokenSuffix, this.user),
       siteDomain: (() => {
         try {
           return new URL(siteUrl).hostname;
@@ -120,14 +124,13 @@ export class SiteOptions implements PhpHost {
       generator: `Typecho ${this.values.version ?? '1.3.1'}`,
       software: 'Typecho',
       version: this.values.version ?? '1.3.1',
-      loginAction: this.tokenUrl(this.router.url('do', { action: 'login', widget: 'Login' }, joinUrl('index.php', rootUrl)), secret),
-      registerAction: this.tokenUrl(this.router.url('do', { action: 'register', widget: 'Register' }, index), secret),
+      loginAction: this.tokenUrl(joinUrl('/action/login', rootUrl), secret, tokenSuffix),
+      registerAction: this.tokenUrl(this.router.url('do', { action: 'register', widget: 'Register' }, index), secret, tokenSuffix),
     };
   }
 
-  private tokenUrl(path: string, secret: string, authCode = '', uid: number | string = ''): string {
-    const tokenSource = `${secret}${authCode ? `&${authCode}&${uid}` : ''}`;
-    const token = md5(`${tokenSource}&${path.split('#')[0]}`);
+  private tokenUrl(path: string, secret: string, suffix: string, user?: AuthUser | null): string {
+    const token = securityToken(secret, suffix.split('#')[0], user);
     try {
       const parsed = new URL(path);
       parsed.searchParams.set('_', token);
@@ -138,6 +141,10 @@ export class SiteOptions implements PhpHost {
       params.set('_', token);
       return `${base}?${params.toString()}`;
     }
+  }
+
+  get currentUser(): AuthUser | null {
+    return this.user;
   }
 
   get(name: string): any {
@@ -207,5 +214,6 @@ export class SiteOptions implements PhpHost {
 
 export async function loadOptions(db: Db, request: RequestContext, echo: (v: unknown) => void, siteUrl?: string): Promise<SiteOptions> {
   const values = await loadOptionValues(db);
-  return new SiteOptions({ values, request, echo, siteUrl });
+  const user = await findCurrentUser(db, request);
+  return new SiteOptions({ values, request, echo, siteUrl, user });
 }

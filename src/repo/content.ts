@@ -62,7 +62,6 @@ export interface CommentRow {
 
 export interface ContentListQuery {
   type?: string;
-  status?: string;
   limit?: number;
   offset?: number;
   authorId?: number;
@@ -82,9 +81,10 @@ function buildWhere(query: ContentListQuery): { sql: string; params: unknown[] }
   where.push('table.contents.type = ?');
   params.push(query.type ?? 'post');
   where.push('table.contents.status = ?');
-  params.push(query.status ?? PUBLISHED);
-  where.push('table.contents.created < ?');
+  params.push(PUBLISHED);
+  where.push('table.contents.created <= ?');
   params.push(Math.floor(Date.now() / 1000));
+  where.push("(table.contents.password IS NULL OR table.contents.password = '')");
 
   if (query.authorId) {
     where.push('table.contents.authorId = ?');
@@ -128,14 +128,13 @@ export async function countContents(db: Db, query: ContentListQuery): Promise<nu
   return db.count(`SELECT COUNT(cid) AS num FROM table.contents WHERE ${where}`, params);
 }
 
-export async function findContent(db: Db, filter: { cid?: number; slug?: string; type?: string }): Promise<ContentRow | null> {
-  if (filter.cid) {
-    return db.first<ContentRow>('SELECT * FROM table.contents WHERE cid = ?', [filter.cid]);
-  }
-  if (filter.slug) {
-    return db.first<ContentRow>('SELECT * FROM table.contents WHERE slug = ? AND status = ?', [filter.slug, PUBLISHED]);
-  }
-  return null;
+export async function findContent(db: Db, filter: { cid?: number; slug?: string; type: 'post' | 'page' | 'attachment' }): Promise<ContentRow | null> {
+  const lookup = filter.cid ? 'cid = ?' : filter.slug ? 'slug = ?' : null;
+  if (!lookup) return null;
+  return db.first<ContentRow>(
+    `SELECT * FROM table.contents WHERE ${lookup} AND type = ? AND status = ? AND created <= ? AND (password IS NULL OR password = '')`,
+    [filter.cid || filter.slug, filter.type, PUBLISHED, Math.floor(Date.now() / 1000)]
+  );
 }
 
 export async function listCategories(db: Db, cid?: number): Promise<MetaRow[]> {
@@ -164,26 +163,27 @@ export async function findUser(db: Db, uid: number): Promise<UserRow | null> {
 
 export async function listComments(db: Db, cid: number): Promise<CommentRow[]> {
   return db.all<CommentRow>(
-    `SELECT * FROM table.comments WHERE cid = ? AND status = 'approved' AND type = 'comment' ORDER BY created ASC, coid ASC`,
-    [cid]
+    `SELECT c.* FROM table.comments c JOIN table.contents p ON p.cid = c.cid WHERE c.cid = ? AND c.status = 'approved' AND c.type = 'comment' AND p.type IN ('post', 'page', 'attachment') AND p.status = 'publish' AND p.created <= ? AND (p.password IS NULL OR p.password = '') ORDER BY c.created ASC, c.coid ASC`,
+    [cid, Math.floor(Date.now() / 1000)]
   );
 }
 
 export async function countComments(db: Db, cid: number): Promise<number> {
-  return db.count(`SELECT COUNT(coid) AS num FROM table.comments WHERE cid = ? AND status = 'approved' AND type = 'comment'`, [cid]);
+  return db.count(`SELECT COUNT(c.coid) AS num FROM table.comments c JOIN table.contents p ON p.cid = c.cid WHERE c.cid = ? AND c.status = 'approved' AND c.type = 'comment' AND p.type IN ('post', 'page', 'attachment') AND p.status = 'publish' AND p.created <= ? AND (p.password IS NULL OR p.password = '')`, [cid, Math.floor(Date.now() / 1000)]);
 }
 
 export async function listRecentComments(db: Db, limit = 5, includeCommentOnly = true): Promise<CommentRow[]> {
-  const typeFilter = includeCommentOnly ? `AND type = 'comment'` : '';
+  const typeFilter = includeCommentOnly ? `AND c.type = 'comment'` : '';
   return db.all<CommentRow>(
-    `SELECT * FROM table.comments WHERE status = 'approved' ${typeFilter} ORDER BY created DESC LIMIT ?`,
-    [limit]
+    `SELECT c.* FROM table.comments c JOIN table.contents p ON p.cid = c.cid WHERE c.status = 'approved' ${typeFilter} AND p.type IN ('post', 'page', 'attachment') AND p.status = 'publish' AND p.created <= ? AND (p.password IS NULL OR p.password = '') ORDER BY c.created DESC LIMIT ?`,
+    [Math.floor(Date.now() / 1000), limit]
   );
 }
 
 export async function listPages(db: Db): Promise<ContentRow[]> {
   return db.all<ContentRow>(
-    `SELECT * FROM table.contents WHERE type = 'page' AND status = 'publish' ORDER BY "order" ASC, cid ASC`
+    `SELECT * FROM table.contents WHERE type = 'page' AND status = 'publish' AND created <= ? AND (password IS NULL OR password = '') ORDER BY "order" ASC, cid ASC`,
+    [Math.floor(Date.now() / 1000)]
   );
 }
 

@@ -10,6 +10,15 @@ import { loadOptions, type SiteOptions } from './core/options';
 import { BundledThemeStore, makeIncludeResolver, normalize } from './core/theme';
 import { escapeHtml } from './core/common';
 import { listCategories, listContents, listPages, listRecentComments } from './repo/content';
+import { handleAuthRequest, isInstallationComplete, renderInstaller } from './core/install-auth';
+import { handleAdminContentRequest } from './core/admin-content';
+import { handleAdminSettingsRequest } from './core/admin-settings';
+import { handleFeed } from './core/feed';
+import { handleCommentRequest } from './core/comment-action';
+import { handleUploadRequest } from './core/uploads';
+import { handleAdminMetasRequest } from './core/admin-metas';
+import { handleAdminCommentsRequest } from './core/admin-comments';
+import { handleAdminUsersRequest } from './core/admin-users';
 import { Archive } from './widgets/archive';
 import { CommentsWidget } from './widgets/comments';
 import { RowsWidget } from './widgets/rows';
@@ -31,8 +40,33 @@ export async function renderSite(env: Env, rawRequest: Request): Promise<Respons
   const echo = (value: unknown) => out.push(toStr(value));
   const options = await loadOptions(db, request, echo, env.SITE_URL);
 
-  if (!options.get('installed')) {
-    return new Response('Missing Config File', { status: 503, headers: { 'content-type': 'text/plain; charset=UTF-8' } });
+  if (!(await isInstallationComplete(db))) return renderInstaller(db, request);
+
+  const authResponse = await handleAuthRequest(db, request, String(options.get('secret') ?? ''));
+  if (authResponse) return authResponse;
+  const contentResponse = await handleAdminContentRequest(db, request, String(options.get('secret') ?? ''));
+  if (contentResponse) return contentResponse;
+  const settingsResponse = await handleAdminSettingsRequest(db, request, String(options.get('secret') ?? ''));
+  if (settingsResponse) return settingsResponse;
+  const uploadResponse = await handleUploadRequest(db, request, String(options.get('secret') ?? ''), env.BUCKET, rawRequest);
+  if (uploadResponse) return uploadResponse;
+  const metasResponse = await handleAdminMetasRequest(db, request, String(options.get('secret') ?? ''));
+  if (metasResponse) return metasResponse;
+  const commentsResponse = await handleAdminCommentsRequest(db, request, String(options.get('secret') ?? ''));
+  if (commentsResponse) return commentsResponse;
+  const usersResponse = await handleAdminUsersRequest(db, request, String(options.get('secret') ?? ''));
+  if (usersResponse) return usersResponse;
+  const feedResponse = await handleFeed(db, request, options);
+  if (feedResponse) return feedResponse;
+  const commentResponse = await handleCommentRequest(db, request, options);
+  if (commentResponse) return commentResponse;
+  if (request.pathInfo === '/' && (request.isPost || request.query.has('s'))) {
+    const form = request.isPost ? await request.body?.() : null;
+    const search = String(form?.get('s') ?? request.query.get('s') ?? '').trim();
+    if (!search || [...search].length > 200) return new Response('Invalid search query', { status: 400 });
+    if (!options.router.get('search')) return new Response('Search route is not configured', { status: 404 });
+    const destination = options.router.url('search', { keywords: encodeURIComponent(search) }, options.derived.index);
+    return new Response(null, { status: 303, headers: { location: destination } });
   }
 
   const match = options.router.match(request.pathInfo);

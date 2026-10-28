@@ -21,5 +21,7 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      - name: Documentation build
+        run: npm run docs:build
       - name: Bundle check
         run: npx wrangler deploy --dry-run --outdir=.wrangler/dist

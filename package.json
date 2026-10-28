@@ -9,13 +9,31 @@
     "predev": "npm run gen",
     "dev": "wrangler dev",
     "predeploy": "npm run gen",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run db:migrate:remote && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:migrate:local": "wrangler d1 migrations apply typecho --local",
-    "db:migrate:remote": "wrangler d1 migrations apply typecho --remote",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:seed:local": "wrangler d1 execute typecho --local --file=scripts/seed-local.sql"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "Stores site settings and blog content. The deployment command applies D1 migrations."
+      },
+      "BUCKET": {
+        "description": "Stores uploaded image attachments; the current media manager accepts JPG, PNG, GIF and WebP files up to 5 MB."
+      }
+    }
+  },
+  "overrides": {
+    "vitepress": {
+      "vite": "^6.4.4"
+    }
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -26,6 +44,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261027.1",
     "typescript": "^7.0.2",
+    "vitepress": "^1.6.4",
     "vitest": "^5.0.5",
     "wrangler": "^4.153.0"
   }

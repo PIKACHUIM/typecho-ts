@@ -1,182 +1,98 @@
-# Typecho Work / typecho-ts
+# Typecho on Cloudflare Workers
 
-把 [Typecho](https://typecho.org) 从 PHP 移植到 **Hono + Cloudflare Workers**：数据放 **D1**，文件放 **R2**，
-站点 URL 与页面输出保持与 PHP 版一致，主题与插件按**原 PHP 源码**运行。
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![Hono](https://img.shields.io/badge/Framework-Hono-E36002)](https://hono.dev/)
+[![D1](https://img.shields.io/badge/Database-D1-2463EB)](https://developers.cloudflare.com/d1/)
+[![R2](https://img.shields.io/badge/Storage-R2-2463EB)](https://developers.cloudflare.com/r2/)
+[![GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE.txt)
 
-> 上游 PHP 代码已从工作树移除（历史仍保留在 git 中）。当前仓库只包含 TypeScript Worker 实现。
+## 简介
 
-## 当前进度
+把熟悉的 Typecho 前台带到 Cloudflare Workers：Hono 负责接收请求，D1 保存站点数据，R2 用来放附件。现在仓库里有 `default` 和 `classic-22` 两套主题模板，页面由 Worker 渲染，不需要单独维护 PHP 主机。
 
-| 模块 | 状态 |
-| --- | --- |
-| Hono 入口、D1 schema、路由表（含分页路由）、options 派生 URL | ✅ |
-| PHP 子集解释器（`php-parser` + tree-walking evaluator） | ✅ 常用语法 |
-| 前台主题渲染：`default` / `classic-22` 的首页、文章页、页面、分类、搜索、404 | ✅ |
-| Archive / Comments / Contents / Metas / Users 等主题 API | ✅ 主要方法 |
-| 后台 25 个页面与 `/action/*`（登录、发文、设置、附件、插件管理） | 🚧 待实现 |
-| 插件 hook 运行时、R2 主题/插件文件存储、在线编辑 | 🚧 待实现 |
-| Feed、XML-RPC、评论提交、上传、安装向导、备份 | 🚧 待实现 |
-| 与 PHP 版逐字节对比的基线测试 | 🚧 待实现 |
+空白 D1 数据库首次访问会进入初始化向导，可以设置站点信息并创建管理员账户；`/admin/login.php` 提供登录与会话。后台目前提供基础文章和页面管理、分类标签、评论审核、用户资料与站点设置，以及图片附件管理；前台提供搜索、评论提交和 RSS/Atom。它仍未完整兼容原版 Typecho：插件运行时、第三方主题、其他后台页面、数据导入等还没有实现。**请先用于体验和验证，不要承载重要数据。**
 
-当前版本只能通过 `scripts/seed-local.sql` 之类的数据完成**只读站点**演示，
-后台与安装向导尚未实现，请勿用于生产环境。
+[使用文档与教程](docs/index.md) · [查看源码](https://github.com/PIKACHUIM/typecho-ts)
 
-## 为什么不是 node-php
+## 它是怎么工作的
 
-Workers 里没有 Node 运行时、没有子进程、没有磁盘，并且**禁止** `eval` / `new Function` /
-`WebAssembly.compile` / `instantiate(buffer)`。因此：
+Worker 收到请求后，用 D1 读取文章、分类和站点设置，再按路由挑选主题模板。模板仍然是 PHP 文件；项目用 `php-parser` 读取它们，并由自己的解释器执行，最后返回 HTML。主题静态资源由 Cloudflare Assets 提供，附件路径则映射到 R2。
 
-- `node-php`、`php-wasm` 的 Node 绑定跑不了；
-- "PHP 编译成 JS 再执行" 也跑不了（需要 `eval`）；
-- 静态内置 PHP-WASM 可行但体积 8–12 MB、冷启动接近 1s 上限，PHP 侧还拿不到网络/GD。
-
-本项目改为：**用 `php-parser` 解析出 AST，自己遍历执行**。不生成代码，所以：
-
-- 解释器可以直接执行内置包或 R2 中的 PHP 源文件，**后台上传或编辑主题、插件后即时生效**；
-- 无需重新部署，也不需要 PHP 运行时。
+这样做的目标是尽量保留 Typecho 模板熟悉的写法，同时把运行环境换成 Cloudflare 的边缘服务。当前只覆盖项目内置主题实际用到的 PHP 能力；第三方插件尚不能直接启用，第三方主题也需要先确认它使用的语法和 Typecho API 是否受支持。
 
 ## 架构
 
-```
+```text
 浏览器
-  ├─ /admin/css|js|img, /usr/themes/*/**.css|js|img  → Static Assets（不经过 Worker）
-  ├─ /usr/uploads/*                                  → R2 + Cache-Control: immutable
-  └─ 其余全部                                        → Worker (Hono)
-        ├─ options 加载与派生 URL（siteUrl/themeUrl/feedUrl…）
-        ├─ routingTable 编译与匹配（永久链接可改）
-        ├─ Archive → 选主题模板 → PHP 解释器渲染 → HTML
-        └─ （待实现）/action/*、/admin/*、/install、Feed
+  ├─ 页面请求 ───────────────> Hono Worker ──> D1
+  │                                  └────────> PHP 模板解释器 ──> HTML
+  ├─ 主题与后台静态资源 ──────> Cloudflare Assets
+  └─ /usr/uploads/* ──────────> Hono Worker ──> R2
 ```
 
-一次请求内：加载 `typecho_options`（1 次查询）→ 匹配路由 → 按需查询
-`contents/comments/metas/fields/users` → 执行主题模板 → 返回 HTML。
+## 一键部署
+
+<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/PIKACHUIM/typecho-ts"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"></a>
+
+Cloudflare 会根据 `wrangler.toml` 创建并绑定 Worker 所需的 D1、R2 资源；部署脚本会生成主题模板、应用 D1 表结构并发布 Worker。
+
+部署完成后，打开 Worker 地址即可设置站点标题、管理员账户等信息；之后通过 `/admin/login.php` 登录。后台已接入基础写作、评论、站点设置和图片上传，但尚不具备原版 Typecho 的全部管理与插件能力，不适合直接承载正式站点。不要把本地演示数据导入生产环境。
+
+## 手动部署
+
+需要 Node.js 20 或更新版本、一个 Cloudflare 账号，以及 Wrangler 登录权限。
+
+1. 获取代码并安装依赖：
+
+   ```bash
+   git clone https://github.com/PIKACHUIM/typecho-ts.git
+   cd typecho-ts
+   npm install
+   npx wrangler login
+   ```
+
+2. 创建 D1 数据库与 R2 bucket：
+
+   ```bash
+   npx wrangler d1 create typecho
+   npx wrangler r2 bucket create typecho-files
+   ```
+
+3. 把 `wrangler.toml` 中 `database_id` 的占位值替换为 D1 创建命令返回的 ID。数据库名和 bucket 名分别保持为 `typecho`、`typecho-files`。
+
+4. 生成主题、应用远程 D1 迁移并部署：
+
+   ```bash
+   npm run deploy
+   ```
+
+`npm run deploy` 会先运行 `npm run gen`，然后应用 D1 迁移并发布 Worker。部署后可在 Cloudflare 控制台为 Worker 绑定域名；首次访问会进入初始化向导。部署和初始化已经打通，但管理功能仍在迁移中。
+
+本地演示请看[快速预览教程](docs/guide/quick-start.md)。`scripts/seed-local.sql` 会清空并重建本地演示数据，**只供本地开发使用**，不要对远程数据库执行。
 
 ## 目录结构
 
-```
-src/
-  index.ts              Hono 入口
-  app.ts                请求编排、widget 注册、错误页
-  core/                 db(D1) / options / router / request / common / theme / markdown
-  repo/content.ts       contents、comments、metas、users、fields 查询
-  widgets/              Archive、Comments、Rows（主题可见的 PHP 宿主对象）
-  generated/themes.ts   构建期生成：主题 PHP 源码打包为字符串
-php-compat/
-  parse.ts              php-parser 封装 + AST 缓存
-  interpreter.ts        语句/表达式求值（全异步）、类、命名空间、include
-  runtime.ts            Runtime / Scope / ClassDef
-  values.ts             PhpArray、类型转换、松散比较
-  builtins.ts           约 150 个内置函数
-  host.ts               PHP ↔ TypeScript 宿主对象桥
-  date.ts / md5.ts      日期与哈希
-themes/                 主题 PHP 模板（default、classic-22）
-plugins/                插件 PHP（HelloWorld 示例）
-public/                 静态资源（admin css/js/img、主题 css/img、robots.txt）
-migrations/             D1 schema
-scripts/                gen-themes.mjs（打包主题）、seed-local.sql（本地演示数据）
-tests/                  解释器 / 路由 / 主题渲染测试
+```text
+src/                 Worker 入口、D1 查询、路由和页面渲染
+php-compat/          PHP 模板解释器
+themes/              内置主题模板
+public/              主题与管理界面的静态资源
+migrations/          D1 表结构迁移
+scripts/             主题生成和本地演示数据
+plugins/             插件示例（插件运行时尚未接入）
+docs/                面向站点使用者的 VitePress 文档
 ```
 
-主题与插件的 **PHP 源文件不在 `public/` 中**，不会被公开下载。
-
-## 快速开始
+主题 PHP 源文件不会放在 `public/` 中。文档站可在本地运行：
 
 ```bash
-npm install
-npm run gen                       # 把 themes/ 下的模板打包进 Worker
-npm run db:migrate:local          # 创建本地 D1 表
-npm run db:seed:local             # 可选：写入演示站点（1 篇文章、1 个页面、1 条评论）
-npm run dev                       # http://localhost:8787（端口固定在 wrangler.toml 的 [dev]）
+npm run docs:dev
 ```
-
-本地 seed **不写入 `siteUrl`**，此时站点 URL 跟随请求的 Host，换端口不需要重新 seed。
-生产环境必须在后台或 `options` 表里写入真实域名，否则永久链接与主题资源会指向错误地址。
-
-其他命令：
-
-```bash
-npm test          # 解释器、路由、真实主题渲染
-npm run typecheck
-npm run deploy    # 需要先在 wrangler.toml 填真实 database_id
-```
-
-## 部署
-
-1. 建库与桶：
-
-```bash
-npx wrangler d1 create typecho
-npx wrangler r2 bucket create typecho-files
-```
-
-2. 把 `wrangler.toml` 里的 `database_id` 换成上一步返回的 ID。
-
-3. 初始化远程表结构并部署：
-
-```bash
-npm run db:migrate:remote
-npm run deploy
-```
-
-4. 绑定自定义域名后访问站点根路径；`siteUrl` 选项需与域名一致，否则永久链接会指向旧地址。
-
-### 上传目录
-
-`/usr/uploads/YYYY/MM/<file>` 由 Worker 从 R2 的 `uploads/YYYY/MM/<file>` 读取。
-数据库里依旧保存 `/usr/uploads/...` 形式的相对路径，主题无需修改。
-
-## 主题与插件
-
-- 内置主题放在 `themes/<name>/*.php`，执行 `npm run gen` 生成打包内容。
-- 主题静态资源放在 `public/usr/themes/<name>/`，按原 URL 提供。
-- 模板里可用：`$this->options`、`$this->need()`、`$this->next()` / `have()` / `is()`、`content()`、
-  `excerpt()`、`permalink()`、`date()`、`category()`、`tags()`、`commentsNum()`、`comments()`、`pageNav()`、
-  `thePrev()` / `theNext()`、`archiveTitle()`、`header()` / `footer()`、`remember()`、`fields`，以及
-  `\Widget\Contents\Page\Rows`、`\Widget\Contents\Post\Recent`、`\Widget\Comments\Recent`、
-  `\Widget\Metas\Category\Rows` 的 `alloc()`。
-- 插件宿主（`Typecho\Plugin`、`Typecho\Db`、`Helper\Form` 等）与 hook 注册表尚未接入。
-
-## PHP 兼容层
-
-已支持：`<?php ?>` / `<?=`、字符串插值与 heredoc、全部运算符与优先级、`if/elseif/else`（含 `endif` 语法）、
-`while/do/for/foreach`（含 `endwhile`）、`switch`、函数、闭包与箭头函数、类/接口/trait、`static` 成员与常量、
-`namespace/use`、`try/catch/finally`、`include/require`、`list()` 解构、`match`、`??` / `?->`。
-
-不支持（会抛出可读错误）：
-
-| 能力 | 原因 |
-| --- | --- |
-| `eval`、可变变量、`extract`、`goto`、生成器 | 解释器不实现，Workers 也不允许动态代码 |
-| 引用返回、全局引用 | 仅支持局部 `&` 赋值 |
-| GD / Imagick、curl、intl、iconv、`exec`、`proc_open` | Workers 无原生扩展、无子进程 |
-| `$_SESSION` | 无 PHP 会话；登录态走 Cookie |
-| 真实文件系统 API | 上传在 R2，模板/插件文件走 FileStore 抽象 |
-
-## 数据层约定（D1）
-
-- 表名、列名、类型与 Typecho `install/SQLite.sql` 一致，默认前缀 `typecho_`（`DB_PREFIX` 可改）。
-- 单查询最多 **100 个绑定参数**：`relationships` / `fields` 批量写入需分片。
-- `LIKE` 模式最长 **50 字节**：站内搜索使用 `instr(lower(col), lower(?))`。
-- 没有交互式事务：多条写入统一走 `db.batch()`（原子）；失败按退避重试 `SQLITE_BUSY`。
-- 计数（`commentsNum`、`metas.count`）与主记录在同一次 batch 内更新。
-
-## 测试
-
-```bash
-npm test
-```
-
-- `tests/php-interpreter.spec.ts`：语法覆盖、宿主对象桥、异常与退出。
-- `tests/router.spec.ts`：路由表编译/匹配/反解、`Common::url`、截断与 HTML 修复。
-- `tests/theme-default.spec.ts`：用真实 `themes/default` 模板渲染首页与文章页，断言关键 HTML。
-
-## 路线图
-
-1. M4：后台 25 个页面 + `/action/*`（登录、发文、评论审核、设置、用户、附件）。
-2. M5：插件 hook 运行时、`Typecho\Db`/`Form` shim、R2 FileStore、在线编辑主题。
-3. M6：Feed、评论提交、上传、`/install` 安装向导、XML-RPC、备份。
-4. M7：与 PHP 版的 HTML 基线对比、HyperDown 输出对齐、主题兼容矩阵。
 
 ## 许可证
 
-GPL-2.0，与上游 Typecho 一致。原始 PHP 实现版权归 Typecho Team。
+本项目采用 [GNU GPL v2](LICENSE.txt)。Typecho 相关内容遵循上游项目的授权与版权声明。
+
+## 致谢
+
+感谢 [Typecho](https://typecho.org/) 团队与社区打下的基础，感谢 [Hono](https://hono.dev/)、[Cloudflare Workers](https://workers.cloudflare.com/) 及其 D1、R2 服务，以及 [php-parser](https://github.com/glayzzle/php-parser) 项目提供的工具。

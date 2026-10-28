@@ -75,7 +75,7 @@ export class CommentsWidget implements PhpHost {
     if (!row) return;
     const name = escapeHtml(row.author ?? '');
     const shouldLink = autoLink === null ? !!row.url : autoLink;
-    if (shouldLink && row.url) {
+    if (shouldLink && row.url && /^https?:\/\//i.test(row.url)) {
       const rel = noFollow ? ' rel="nofollow"' : '';
       this.echo(`<a href="${escapeHtml(row.url)}"${rel}>${name}</a>`);
     } else {
@@ -98,7 +98,7 @@ export class CommentsWidget implements PhpHost {
   }
 
   async content(): Promise<void> {
-    this.echo(this.currentRow?.text ?? '');
+    this.echo(safeCommentHtml(this.currentRow?.text ?? ''));
   }
 
   async listComments(): Promise<void> {
@@ -149,7 +149,7 @@ export function renderComment(row: CommentRow, options: SiteOptions): string {
   const permalink = options.router.url('post', { cid: String(row.cid) }, options.derived.index);
   const author = escapeHtml(row.author ?? '');
   const date = dateFormat(row.created, String(options.get('commentDateFormat') ?? 'F jS, Y \a\t h:ia'), Number(options.get('timezone') ?? 0));
-  const text = row.text ?? '';
+  const text = safeCommentHtml(row.text ?? '');
   return `<li id="comment-${row.coid}" class="comment-body comment-parent">
 <article id="comment-${row.coid}" class="comment-body">
     <footer class="comment-meta">
@@ -165,4 +165,16 @@ export function renderComment(row: CommentRow, options: SiteOptions): string {
     </div>
 </article>
 </li>`;
+}
+
+function safeCommentHtml(source: string): string {
+  const withLines = source.replace(/<br\s*\/?\s*>/gi, '\n');
+  const decoded = withLines.replace(/&(?:amp|lt|gt|quot|apos|#039|#(?:x[0-9a-f]+|[0-9]+));/gi, (entity) => {
+    const code = entity.slice(1, -1).toLowerCase();
+    const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#039': "'" };
+    if (code in named) return named[code];
+    const number = code.startsWith('#x') ? Number.parseInt(code.slice(2), 16) : Number.parseInt(code.slice(1), 10);
+    return number > 0 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff) ? String.fromCodePoint(number) : '';
+  });
+  return escapeHtml(decoded).replace(/\r\n?|\n/g, '<br />\n');
 }

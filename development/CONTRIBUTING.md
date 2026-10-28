@@ -44,7 +44,7 @@ npm run dev
 ## 主题开发
 
 目录：`themes/<name>/*.php`；静态资源：`public/usr/themes/<name>/`。
-模板可用的 `$this` API 见 README 的「主题与插件」一节。
+模板宿主 API 由 `src/widgets/` 和 `src/app.ts` 注册；修改时请补充 `tests/theme-default.spec.ts`。
 
 ## 许可
 
