@@ -82,5 +82,5 @@ export function absoluteUrl(request: RequestContext, path?: string | null): stri
 }
 
 export function currentRequestUrl(request: RequestContext): string {
-  return `${request.rootUrl}${request.url.pathname}${request.url.search}`;
+  return `${request.url.origin}${request.url.pathname}${request.url.search}`;
 }

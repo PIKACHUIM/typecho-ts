@@ -3,7 +3,7 @@ import { cookiePrefix, createLoginCookies, findCurrentUser, hashPassword, passwo
 import { Db } from '../src/core/db';
 import { handleAuthRequest } from '../src/core/install-auth';
 import { SiteOptions } from '../src/core/options';
-import { buildRequestContext } from '../src/core/request';
+import { buildRequestContext, currentRequestUrl } from '../src/core/request';
 
 const root = 'https://example.test';
 const secret = 'site-secret';
@@ -122,6 +122,7 @@ describe('Typecho authentication compatibility', () => {
   it('signs option action URLs using the real request URL on subpath installations', () => {
     const url = `${root}/blog/admin/login.php?referer=%2Fblog%2Fadmin%2F`;
     const request = buildRequestContext(new Request(url), { basePath: '/blog' });
+    expect(currentRequestUrl(request)).toBe(url);
     const user = { uid: 7, authCode: 'active-session' } as AuthUser;
     const options = new SiteOptions({ values: { secret }, request, echo: () => {}, user });
     expect(options.currentUser).toBe(user);
