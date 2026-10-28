@@ -13,6 +13,7 @@ import {
 } from './values';
 import { PhpObject, Runtime } from './runtime';
 import { dateFormat } from './date';
+import { encodePhpSerialized, parsePhpSerialized } from './serialize';
 
 function arr(v: unknown): PhpArray {
   if (v instanceof PhpArray) return v;
@@ -722,8 +723,25 @@ export function registerBuiltins(runtime: Runtime): void {
     return undefined;
   });
   def('print_r', (v: unknown, ret?: unknown) => (truthy(ret) ? dump(v) : dump(v)));
-  def('serialize', (v: unknown) => JSON.stringify(toJs(v)));
-  def('unserialize', (s: unknown) => fromJs(JSON.parse(toStr(s))));
+  def('serialize', (v: unknown) => {
+    try {
+      return encodePhpSerialized(v);
+    } catch {
+      return false;
+    }
+  });
+  def('unserialize', (s: unknown) => {
+    const source = toStr(s);
+    try {
+      return fromJs(parsePhpSerialized(source));
+    } catch {
+      try {
+        return fromJs(JSON.parse(source));
+      } catch {
+        return false;
+      }
+    }
+  });
   def('array_is_list', (v: unknown) => v instanceof PhpArray && v.keys().every((k, i) => typeof k === 'number' && k === i));
 }
 

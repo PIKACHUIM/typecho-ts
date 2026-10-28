@@ -1,6 +1,7 @@
 import { PHP_HOST, type PhpHost } from '../../php-compat/host';
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
 import { PhpArray } from '../../php-compat/values';
+import { parsePhpSerialized } from '../../php-compat/serialize';
 import { buildUrl, url as joinUrl } from './common';
 import type { Db } from './db';
 import type { RequestContext } from './request';
@@ -16,10 +17,10 @@ export interface OptionsLoadResult {
 /** Loads `options` rows plus the active theme's option overrides. */
 export async function loadOptionValues(db: Db): Promise<OptionValues> {
   const rows = await db.all<{ name: string; value: string | null }>(`SELECT name, value FROM table.options WHERE user = 0`);
-  const raw: Record<string, string | null> = {};
+  const raw: Record<string, string | null> = Object.create(null);
   for (const row of rows) raw[row.name] = row.value;
 
-  const values: OptionValues = {};
+  const values: OptionValues = Object.create(null);
   for (const [name, value] of Object.entries(raw)) {
     if (name.startsWith('theme:')) continue;
     values[name] = parseValue(value);
@@ -28,7 +29,7 @@ export async function loadOptionValues(db: Db): Promise<OptionValues> {
   // Theme options are merged over the global ones, like Typecho's Options widget.
   const themeKey = `theme:${values.theme}`;
   const themeOptions = parseValue(raw[themeKey] ?? null);
-  if (themeOptions && typeof themeOptions === 'object') Object.assign(values, themeOptions);
+  if (themeOptions && typeof themeOptions === 'object' && !Array.isArray(themeOptions)) Object.assign(values, themeOptions);
   // A theme override must not enable plugin PHP outside the administrator switch.
   values.phpPluginHooks = parseValue(raw.phpPluginHooks ?? null);
   return values;
@@ -40,6 +41,13 @@ function parseValue(value: string | null): any {
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  if (/^(?:[abids]:|N;)/.test(trimmed)) {
+    try {
+      return parsePhpSerialized(trimmed);
     } catch {
       return value;
     }
