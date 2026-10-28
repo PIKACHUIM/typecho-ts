@@ -5,6 +5,7 @@ import type { Db } from '../core/db';
 import type { SiteOptions } from '../core/options';
 import type { RequestContext } from '../core/request';
 import type { CommentRow, ContentRow, MetaRow } from '../repo/content';
+import { commentExcerptText } from './comments';
 
 type Row = ContentRow | MetaRow | CommentRow | Record<string, any>;
 
@@ -118,7 +119,7 @@ export class RowsWidget implements PhpHost {
 
   async excerpt(length = 35, trim = '...'): Promise<void> {
     const row = this.currentRow as CommentRow | null;
-    const plain = (row?.text ?? '').replace(/<[^>]*>/g, '');
+    const plain = commentExcerptText(row?.text ?? '');
     const chars = [...plain];
     this.echo(escapeHtml(chars.length > Number(length) ? chars.slice(0, Number(length)).join('') + String(trim) : plain));
   }

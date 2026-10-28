@@ -139,7 +139,7 @@ export class CommentsWidget implements PhpHost {
   async excerpt(length = 100, trim = '...'): Promise<void> {
     const row = this.currentRow;
     if (!row) return;
-    const plain = (row.text ?? '').replace(/<[^>]*>/g, '');
+    const plain = commentExcerptText(row.text ?? '');
     this.echo(escapeHtml(subStr(plain, 0, length, trim)));
   }
 
@@ -337,14 +337,21 @@ cancel.style.display='none';
 });</script>`;
 }
 
+export function commentExcerptText(source: string): string {
+  return decodeCommentEntities(source.replace(/<br\s*\/?\s*>/gi, '\n').replace(/<[^>]*>/g, ''));
+}
+
 function safeCommentHtml(source: string): string {
   const withLines = source.replace(/<br\s*\/?\s*>/gi, '\n');
-  const decoded = withLines.replace(/&(?:amp|lt|gt|quot|apos|#039|#(?:x[0-9a-f]+|[0-9]+));/gi, (entity) => {
+  return escapeHtml(decodeCommentEntities(withLines)).replace(/\r\n?|\n/g, '<br />\n');
+}
+
+function decodeCommentEntities(source: string): string {
+  return source.replace(/&(?:amp|lt|gt|quot|apos|#039|#(?:x[0-9a-f]+|[0-9]+));/gi, (entity) => {
     const code = entity.slice(1, -1).toLowerCase();
     const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#039': "'" };
     if (code in named) return named[code];
     const number = code.startsWith('#x') ? Number.parseInt(code.slice(2), 16) : Number.parseInt(code.slice(1), 10);
     return number > 0 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff) ? String.fromCodePoint(number) : '';
   });
-  return escapeHtml(decoded).replace(/\r\n?|\n/g, '<br />\n');
 }
