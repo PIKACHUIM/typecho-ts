@@ -10,6 +10,9 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "none"
 
+[dev]
+port = 8787
+
 [[d1_databases]]
 binding = "DB"
 database_name = "typecho"

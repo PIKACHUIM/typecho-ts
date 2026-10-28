@@ -1,4 +1,6 @@
 -- Local development seed: a minimal installed Typecho site.
+-- siteUrl is intentionally not seeded: the app falls back to the request root,
+-- so the demo works on any local port. Set it in production.
 --   npx wrangler d1 execute typecho --local --file=scripts/seed-local.sql
 DELETE FROM typecho_options;
 DELETE FROM typecho_contents;
@@ -29,7 +31,6 @@ INSERT INTO typecho_options (name, "user", value) VALUES
  ('theme', 0, 'default'),
  ('title', 0, 'Typecho Work'),
  ('description', 0, 'Typecho on Cloudflare Workers'),
- ('siteUrl', 0, 'http://localhost:8789'),
  ('rewrite', 0, '1'),
  ('pageSize', 0, '5'),
  ('postsListSize', 0, '5'),

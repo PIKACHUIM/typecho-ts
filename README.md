@@ -86,8 +86,11 @@ npm install
 npm run gen                       # 把 themes/ 下的模板打包进 Worker
 npm run db:migrate:local          # 创建本地 D1 表
 npm run db:seed:local             # 可选：写入演示站点（1 篇文章、1 个页面、1 条评论）
-npm run dev                       # http://127.0.0.1:8787
+npm run dev                       # http://localhost:8787（端口固定在 wrangler.toml 的 [dev]）
 ```
+
+本地 seed **不写入 `siteUrl`**，此时站点 URL 跟随请求的 Host，换端口不需要重新 seed。
+生产环境必须在后台或 `options` 表里写入真实域名，否则永久链接与主题资源会指向错误地址。
 
 其他命令：
 
