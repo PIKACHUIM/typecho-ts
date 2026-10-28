@@ -15,7 +15,8 @@ export interface RowsInit {
   echo: (value: unknown) => void;
   rows?: Row[];
   loader?: () => Promise<Row[]>;
-  kind?: 'contents' | 'metas' | 'comments';
+  kind?: 'contents' | 'metas' | 'comments' | 'dates';
+  archiveDateFormat?: string;
 }
 
 /** Host object backing `Widget\Contents\Page\Rows`, `Contents\Post\Recent`, ... */
@@ -26,7 +27,8 @@ export class RowsWidget implements PhpHost {
   private readonly request: RequestContext;
   private readonly echo: (value: unknown) => void;
   private readonly loader?: () => Promise<Row[]>;
-  private readonly kind: 'contents' | 'metas' | 'comments';
+  private readonly kind: 'contents' | 'metas' | 'comments' | 'dates';
+  private readonly archiveDateFormat: string;
 
   private rows: Row[] | null;
   private index = -1;
@@ -40,6 +42,7 @@ export class RowsWidget implements PhpHost {
     this.loader = init.loader;
     this.rows = init.rows ?? null;
     this.kind = init.kind ?? 'contents';
+    this.archiveDateFormat = init.archiveDateFormat ?? 'F Y';
   }
 
   async ensure(): Promise<void> {
@@ -71,6 +74,7 @@ export class RowsWidget implements PhpHost {
   private permalinkValue(): string {
     const row = this.currentRow;
     if (!row) return this.options.derived.siteUrl;
+    if (this.kind === 'dates') return String((row as { permalink: string }).permalink);
     if (this.kind === 'contents') {
       const content = row as ContentRow;
       if (content.type === 'page') return this.options.router.url('page', { slug: content.slug ?? '' }, this.options.derived.index);
@@ -98,7 +102,7 @@ export class RowsWidget implements PhpHost {
   async date(format?: string | null): Promise<void> {
     const row = this.currentRow as ContentRow | null;
     if (!row) return;
-    const fmt = format || String(this.options.get('postDateFormat') ?? 'F j, Y');
+    const fmt = format || (this.kind === 'dates' ? this.archiveDateFormat : String(this.options.get('postDateFormat') ?? 'F j, Y'));
     this.echo(dateFormat(row.created, fmt, Number(this.options.get('timezone') ?? 0)));
   }
 
@@ -135,7 +139,7 @@ export class RowsWidget implements PhpHost {
         out = out.replace(/\{description\}/g, escapeHtml(meta.description ?? ''));
         out = out.replace(
           /\{date\}/g,
-          dateFormat(Number(content.created ?? 0), 'F Y', Number(this.options.get('timezone') ?? 0))
+          dateFormat(Number(content.created ?? 0), this.archiveDateFormat, Number(this.options.get('timezone') ?? 0))
         );
         return out;
       })

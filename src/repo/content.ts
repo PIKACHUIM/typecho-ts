@@ -71,6 +71,7 @@ export interface ContentListQuery {
   year?: number;
   month?: number;
   day?: number;
+  timezoneOffset?: number;
 }
 
 const PUBLISHED = 'publish';
@@ -90,23 +91,46 @@ function buildWhere(query: ContentListQuery): { sql: string; params: unknown[] }
     where.push('table.contents.authorId = ?');
     params.push(query.authorId);
   }
-  if (query.categorySlug || query.tagSlug) {
-    where.push(
-      'table.contents.cid IN (SELECT r.cid FROM table.relationships r JOIN table.metas m ON m.mid = r.mid WHERE m.slug = ? AND m.type = ?)'
-    );
-    params.push(query.categorySlug ?? query.tagSlug, query.categorySlug ? 'category' : 'tag');
+  if (query.categorySlug) {
+    where.push(`table.contents.cid IN (
+      WITH RECURSIVE descendants(mid) AS (
+        SELECT mid FROM table.metas WHERE slug = ? AND type = 'category'
+        UNION
+        SELECT m.mid FROM table.metas m JOIN descendants d ON m.parent = d.mid WHERE m.type = 'category'
+      )
+      SELECT r.cid FROM table.relationships r JOIN descendants d ON d.mid = r.mid
+    )`);
+    params.push(query.categorySlug);
+  } else if (query.tagSlug) {
+    where.push('table.contents.cid IN (SELECT r.cid FROM table.relationships r JOIN table.metas m ON m.mid = r.mid WHERE m.slug = ? AND m.type = ?)');
+    params.push(query.tagSlug, 'tag');
   }
-  if (query.keywords) {
-    where.push('(instr(lower(table.contents.title), lower(?)) > 0 OR instr(lower(table.contents.text), lower(?)) > 0)');
-    params.push(query.keywords, query.keywords);
+  if (query.keywords?.trim()) {
+    const terms = JSON.stringify(query.keywords.trim().split(/\s+/u));
+    const matchesField = (field: 'title' | 'text') => `EXISTS (
+      WITH RECURSIVE terms(value) AS (VALUES (?)), matches(word, remaining) AS (
+        SELECT 0, lower(coalesce(table.contents.${field}, ''))
+        UNION ALL
+        SELECT word + 1,
+          substr(remaining, instr(remaining, lower(json_extract(terms.value, '$[' || word || ']')))
+            + length(json_extract(terms.value, '$[' || word || ']')))
+        FROM matches CROSS JOIN terms
+        WHERE word < json_array_length(terms.value)
+          AND instr(remaining, lower(json_extract(terms.value, '$[' || word || ']'))) > 0
+      )
+      SELECT 1 FROM matches CROSS JOIN terms WHERE word = json_array_length(terms.value)
+    )`;
+    where.push(`(${matchesField('title')} OR ${matchesField('text')})`);
+    params.push(terms, terms);
   }
   if (query.year) {
-    const start = Math.floor(Date.UTC(query.year, (query.month ?? 1) - 1, query.day ?? 1) / 1000);
-    const end = query.day
-      ? start + 86400
+    const timezoneOffset = query.timezoneOffset ?? 0;
+    const start = Math.floor(Date.UTC(query.year, (query.month ?? 1) - 1, query.day ?? 1) / 1000) - timezoneOffset;
+    const end = (query.day
+      ? Math.floor(Date.UTC(query.year, (query.month ?? 1) - 1, query.day + 1) / 1000)
       : query.month
         ? Math.floor(Date.UTC(query.year, query.month, 1) / 1000)
-        : Math.floor(Date.UTC(query.year + 1, 0, 1) / 1000);
+        : Math.floor(Date.UTC(query.year + 1, 0, 1) / 1000)) - timezoneOffset;
     where.push('table.contents.created >= ? AND table.contents.created < ?');
     params.push(start, end);
   }

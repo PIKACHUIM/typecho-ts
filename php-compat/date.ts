@@ -9,13 +9,22 @@ export function dateFormat(ts: number, format: string, offset = 0): string {
   const month = date.getUTCMonth();
   const year = date.getUTCFullYear();
   const hour = date.getUTCHours();
+  const dateNumber = date.getUTCDate();
+  const suffix = dateNumber >= 11 && dateNumber <= 13 ? 'th' :
+    dateNumber % 10 === 1 ? 'st' : dateNumber % 10 === 2 ? 'nd' : dateNumber % 10 === 3 ? 'rd' : 'th';
+  const zoneMinutes = Math.floor(Math.abs(offset) / 60);
+  const zoneSign = offset < 0 ? '-' : '+';
+  const zoneCompact = `${zoneSign}${pad(Math.floor(zoneMinutes / 60))}${pad(zoneMinutes % 60)}`;
+  const zoneColon = `${zoneSign}${pad(Math.floor(zoneMinutes / 60))}:${pad(zoneMinutes % 60)}`;
+  const timeIso = `${year}-${pad(month + 1)}-${pad(dateNumber)}T${pad(hour)}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
   const map: Record<string, string> = {
     Y: String(year),
     y: pad(year % 100),
     m: pad(month + 1),
     n: String(month + 1),
     d: pad(date.getUTCDate()),
-    j: String(date.getUTCDate()),
+    j: String(dateNumber),
+    S: suffix,
     H: pad(hour),
     G: String(hour),
     h: pad(hour % 12 === 0 ? 12 : hour % 12),
@@ -33,13 +42,13 @@ export function dateFormat(ts: number, format: string, offset = 0): string {
     t: String(new Date(Date.UTC(year, month + 1, 0)).getUTCDate()),
     L: new Date(Date.UTC(year, 1, 29)).getUTCMonth() === 1 ? '1' : '0',
     U: String(Math.trunc(ts)),
-    c: new Date((Math.trunc(ts) + offset) * 1000).toISOString().replace('Z', '+00:00'),
-    r: `${DAYS[day].slice(0, 3)}, ${pad(date.getUTCDate())} ${MONTHS[month].slice(0, 3)} ${year} ${pad(hour)}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} +0000`,
-    O: '+0000',
-    P: '+00:00',
-    T: 'UTC',
+    c: `${timeIso}${zoneColon}`,
+    r: `${DAYS[day].slice(0, 3)}, ${pad(dateNumber)} ${MONTHS[month].slice(0, 3)} ${year} ${pad(hour)}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} ${zoneCompact}`,
+    O: zoneCompact,
+    P: zoneColon,
+    T: offset === 0 ? 'UTC' : `GMT${zoneColon}`,
     Z: String(offset),
-    e: 'UTC',
+    e: offset === 0 ? 'UTC' : `UTC${zoneColon}`,
     W: pad(Math.ceil((Date.UTC(year, month, date.getUTCDate()) - Date.UTC(year, 0, 1)) / 86400000 / 7)),
   };
 

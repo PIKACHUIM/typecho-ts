@@ -103,6 +103,7 @@ export class Interpreter {
   }
 
   private async execStatement(node: AstNode, scope: Scope): Promise<PhpValue> {
+    this.runtime.tick();
     switch (node.kind) {
       case 'expressionstatement':
         return this.evalExpr(node.expression, scope);
@@ -113,7 +114,7 @@ export class Interpreter {
         return null;
       }
       case 'inline':
-        this.ctx.out.push(node.value ?? node.raw ?? '');
+        this.ctx.echo(node.value ?? node.raw ?? '');
         return null;
       case 'block':
         return this.execChildren(node.children ?? [], scope);
@@ -442,6 +443,8 @@ export class Interpreter {
       isInterface: node.kind === 'interface',
       isTrait: node.kind === 'trait',
       file: this.ctx.file,
+      namespace: this.ns,
+      imports: new Map(this.uses),
     };
 
     const previousClass = this.currentClass;
@@ -527,6 +530,7 @@ export class Interpreter {
 
   async evalExpr(node: AstNode, scope: Scope): Promise<PhpValue> {
     if (!node) return null;
+    this.runtime.tick();
     if (++this.depth > MAX_DEPTH) {
       this.depth = 0;
       throw new PhpError('Maximum function nesting level reached');
@@ -954,6 +958,20 @@ export class Interpreter {
 
   // ------------------------------------------------------------------- calls
 
+  private enterClass(cls: UserClass): () => void {
+    const previousClass = this.currentClass;
+    const previousNs = this.ns;
+    const previousUses = this.uses;
+    this.currentClass = cls.name;
+    this.ns = cls.namespace ?? '';
+    this.uses = new Map(cls.imports);
+    return () => {
+      this.currentClass = previousClass;
+      this.ns = previousNs;
+      this.uses = previousUses;
+    };
+  }
+
   private async evalCall(node: AstNode, scope: Scope): Promise<PhpValue> {
     const what = node.what;
     const args = await this.evalArgs(node.arguments, scope);
@@ -1084,15 +1102,14 @@ export class Interpreter {
       if (!method) throw new PhpError(`Call to undefined method ${target.cls.name}::${name}()`);
       const local = new Scope(scope.parent, target);
       this.bindParams(local, method.params, args);
-      const previousClass = this.currentClass;
-      this.currentClass = target.cls.name;
+      const restore = this.enterClass(target.cls);
       try {
         await this.execStatement(method.body, local);
       } catch (e) {
         if (e instanceof PhpReturnSignal) return e.value;
         throw e;
       } finally {
-        this.currentClass = previousClass;
+        restore();
       }
       return null;
     }
@@ -1105,6 +1122,11 @@ export class Interpreter {
       return (maybe[name] as (...a: any[]) => unknown)(...args);
     }
     throw new PhpError(`Call to a member function ${name}() on ${typeof target}`);
+  }
+
+  /** Invoke a validated static hook without evaluating PHP from a dynamic source. */
+  async invokeStatic(clsName: string, name: string): Promise<PhpValue> {
+    return this.callStatic(clsName, name, [], new Scope());
   }
 
   private async callStatic(clsName: string, name: string, args: PhpValue[], scope: Scope): Promise<PhpValue> {
@@ -1124,15 +1146,14 @@ export class Interpreter {
     }
     const local = new Scope(scope.parent, null);
     this.bindParams(local, method.params, args);
-    const previousClass = this.currentClass;
-    this.currentClass = cls.name;
+    const restore = this.enterClass(cls);
     try {
       await this.execStatement(method.body, local);
     } catch (e) {
       if (e instanceof PhpReturnSignal) return e.value;
       throw e;
     } finally {
-      this.currentClass = previousClass;
+      restore();
     }
     return null;
   }
@@ -1178,14 +1199,13 @@ export class Interpreter {
     if (ctor) {
       const local = new Scope(scope.parent, obj);
       this.bindParams(local, ctor.params, args);
-      const previousClass = this.currentClass;
-      this.currentClass = cls.name;
+      const restore = this.enterClass(cls);
       try {
         await this.execStatement(ctor.body, local);
       } catch (e) {
         if (!(e instanceof PhpReturnSignal)) throw e;
       } finally {
-        this.currentClass = previousClass;
+        restore();
       }
     }
     return obj;

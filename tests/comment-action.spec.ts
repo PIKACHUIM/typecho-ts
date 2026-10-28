@@ -58,6 +58,7 @@ function options(values: Record<string, unknown> = {}): SiteOptions {
       routingTable: {
         post: { url: '/archives/[cid:digital]/', widget: '\\Widget\\Archive' },
         page: { url: '/[slug:alpha].html', widget: '\\Widget\\Archive' },
+        comment_page: { url: '[permalink:string]/comment-page-[commentPage:digital]', widget: '\\Widget\\CommentPage' },
         feedback: { url: '[permalink:string]/[type:alpha]', widget: '\\Widget\\Feedback' },
       },
       ...values,
@@ -86,6 +87,14 @@ describe('comment action', () => {
     expect(inserts(statements)[0].params).toContain('&lt;script&gt;alert(1)&lt;/script&gt;<br />\nHello');
     expect(inserts(statements)[0].params).toContain('approved');
     expect(statements.some((entry) => entry.sql.includes('UPDATE typecho_contents SET commentsNum'))).toBe(true);
+  });
+
+  it('allows comments posted from a paginated comment page', async () => {
+    const { db } = fakeDb();
+    const referer = `${base}/archives/12/comment-page-2`;
+    const response = await handleCommentRequest(db, submit({ text: 'Reply on page two' }, referer), options());
+    expect(response?.status).toBe(303);
+    expect(response?.headers.get('location')).toBe(`${postUrl}#comment-7`);
   });
 
   it('places moderated comments in waiting without changing the approved count', async () => {

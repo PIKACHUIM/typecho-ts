@@ -29,6 +29,8 @@ export async function loadOptionValues(db: Db): Promise<OptionValues> {
   const themeKey = `theme:${values.theme}`;
   const themeOptions = parseValue(raw[themeKey] ?? null);
   if (themeOptions && typeof themeOptions === 'object') Object.assign(values, themeOptions);
+  // A theme override must not enable plugin PHP outside the administrator switch.
+  values.phpPluginHooks = parseValue(raw.phpPluginHooks ?? null);
   return values;
 }
 

@@ -40,11 +40,16 @@ export async function handleCommentRequest(db: Db, request: RequestContext, opti
     return text('Missing or invalid Referer', 403);
   }
   const refererPath = pathInfoFromUrl(referer);
-  const match = options.router.match(refererPath);
+  const commentPage = options.router.match(refererPath);
+  const parentPath = commentPage?.route.name === 'comment_page'
+    ? commentPage.params?.permalink ?? (commentPage.params?.cid
+      ? options.router.url('post', { cid: commentPage.params.cid }, '') : '')
+    : refererPath;
+  const match = options.router.match(parentPath.startsWith('/') ? parentPath : `/${parentPath}`);
   if (!match || (match.route.name !== 'post' && match.route.name !== 'page')) return text('Invalid comment target', 400);
   if (routedComment) {
     const routeTarget = feedbackRoute.params?.permalink;
-    if (!routeTarget || routeTarget.replace(/\/+$/, '') !== refererPath.replace(/\/+$/, '')) {
+    if (!routeTarget || routeTarget.replace(/\/+$/, '') !== parentPath.replace(/\/+$/, '')) {
       return text('Invalid comment target', 400);
     }
   }

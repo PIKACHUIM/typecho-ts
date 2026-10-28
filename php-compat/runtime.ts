@@ -59,6 +59,8 @@ export interface UserClass {
   isInterface: boolean;
   isTrait: boolean;
   file?: string;
+  namespace?: string;
+  imports?: Map<string, string>;
 }
 
 export interface HostClass {
@@ -132,6 +134,8 @@ export interface RuntimeHostOptions {
   timezoneOffset?: number;
   /** Output sink used by builtins such as `_e()` / `printf()`. */
   echo?: (v: PhpValue) => void;
+  /** Optional per-runtime instruction budget for bounded plugin execution. */
+  maxOperations?: number;
 }
 
 export class Runtime {
@@ -141,6 +145,14 @@ export class Runtime {
   readonly globals = new Map<string, PhpValue>();
   readonly includedFiles = new Set<string>();
   readonly host: RuntimeHostOptions;
+  private operations = 0;
+
+  tick(): void {
+    if (this.host.maxOperations !== undefined && ++this.operations > this.host.maxOperations) {
+      throw new Error('PHP operation limit exceeded');
+    }
+  }
+
   /** Set by the interpreter so builtins can invoke PHP callables. */
   callbackInvoker?: (fn: unknown, args: unknown[]) => Promise<unknown>;
 

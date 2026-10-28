@@ -12,6 +12,8 @@ import {
   verifyPassword,
 } from './auth';
 import type { RequestContext } from './request';
+import type { SiteOptions } from './options';
+import { bundledPluginNames, renderPluginNavBar } from './plugins';
 
 const DEFAULT_ROUTES = {
   index: { url: '/', widget: '\\Widget\\Archive', action: 'render' },
@@ -58,6 +60,8 @@ const INSTALL_OPTIONS: Array<[string, string]> = [
   ['postDateFormat', 'F j, Y'],
   ['commentDateFormat', 'F jS, Y \\a\\t h:ia'],
   ['plugins', JSON.stringify({ activated: {}, handles: {} })],
+  ['phpPluginHooks', '[]'],
+  ['plugin:HelloWorld', JSON.stringify({ word: 'Hello World' })],
   ['actionTable', '{}'],
   ['panelTable', '{}'],
 ];
@@ -176,14 +180,18 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
   return new Response(null, { status: 303, headers });
 }
 
-export async function handleAuthRequest(db: Db, request: RequestContext, secret: string): Promise<Response | null> {
+export async function handleAuthRequest(db: Db, request: RequestContext, secret: string, options?: SiteOptions): Promise<Response | null> {
   const path = request.pathInfo.replace(/\/+$/, '') || '/';
   if (path === '/admin') {
     if (request.method.toUpperCase() !== 'GET') return textResponse('Method Not Allowed', 405);
     const user = await findCurrentUser(db, request);
     if (!user) return redirect(`${request.rootUrl}/admin/login.php?referer=${encodeURIComponent(`${request.rootUrl}/admin/`)}`);
     const logoutUrl = `${request.rootUrl}/action/logout?_=${securityToken(secret, currentPageUrl(request), user)}`;
-    return new Response(adminHomeHtml(request, user, logoutUrl), { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+    const pluginNav = user.group === 'administrator' && options ? await renderPluginNavBar(options) : '';
+    return new Response(adminHomeHtml(request, user, logoutUrl, pluginNav), { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+  }
+  if (path === '/admin/plugins.php' || path === '/action/plugins') {
+    return handlePluginSettings(db, request, secret, path, options);
   }
   if (path === '/admin/login.php') {
     if (request.method.toUpperCase() !== 'GET') return textResponse('Method Not Allowed', 405);
@@ -199,6 +207,41 @@ export async function handleAuthRequest(db: Db, request: RequestContext, secret:
     return logout(db, request, secret);
   }
   return null;
+}
+
+async function handlePluginSettings(db: Db, request: RequestContext, secret: string, path: string, options?: SiteOptions): Promise<Response> {
+  const user = await findCurrentUser(db, request);
+  if (!user) return redirect(`${request.rootUrl}/admin/login.php?referer=${encodeURIComponent(currentPageUrl(request))}`);
+  if (user.group !== 'administrator') return textResponse('Forbidden', 403);
+  const names = bundledPluginNames();
+  if (path === '/admin/plugins.php') {
+    if (request.method !== 'GET') return textResponse('Method Not Allowed', 405);
+    const value = options?.get('phpPluginHooks');
+    const enabled = Array.isArray(value) ? value : [];
+    const action = `${request.rootUrl}/action/plugins?_=${securityToken(secret, currentPageUrl(request), user)}`;
+    const list = names.map((name) => `<form method="post" action="${escapeHtml(action)}"><input type="hidden" name="plugin" value="${escapeHtml(name)}"><input type="hidden" name="enabled" value="${enabled.includes(name) ? '0' : '1'}"><p>${escapeHtml(name)}：${enabled.includes(name) ? '已启用' : '已关闭'}</p><button type="submit">${enabled.includes(name) ? '关闭' : '启用'}</button></form>`).join('');
+    return new Response(pageHtml('插件 Hook', `<main class="card"><h1>打包插件 Hook</h1><p class="muted">默认关闭。仅执行部署时打包的 PHP 文件；当前支持 admin/menu.php 的 navBar。</p>${request.query.has('saved') ? '<p role="status">设置已保存。</p>' : ''}${list}<a class="back" href="${escapeHtml(request.rootUrl)}/admin/">返回后台</a></main>`), { headers: { 'content-type': 'text/html; charset=UTF-8' } });
+  }
+  if (request.method !== 'POST') return textResponse('Method Not Allowed', 405);
+  if (!sameOriginRequest(request) || !request.referer) return textResponse('CSRF validation failed', 403);
+  try {
+    const referer = new URL(request.referer);
+    if (referer.origin !== request.url.origin || referer.pathname !== `${new URL(request.rootUrl).pathname.replace(/\/$/, '')}/admin/plugins.php`) return textResponse('CSRF validation failed', 403);
+  } catch {
+    return textResponse('CSRF validation failed', 403);
+  }
+  if (!constantTimeEquals(request.query.get('_') ?? '', securityToken(secret, request.referer, user))) return textResponse('CSRF validation failed', 403);
+  const form = await request.body?.();
+  const name = String(form?.get('plugin') ?? '');
+  const enabled = String(form?.get('enabled') ?? '');
+  if (!names.includes(name) || !['0', '1'].includes(enabled)) return textResponse('Invalid plugin setting', 400);
+  const current = await db.first<{ value: string | null }>("SELECT value FROM table.options WHERE name = 'phpPluginHooks' AND user = 0");
+  let active: unknown;
+  try { active = JSON.parse(current?.value ?? '[]'); } catch { active = []; }
+  const existing = Array.isArray(active) ? active.filter((item): item is string => typeof item === 'string' && names.includes(item)) : [];
+  const next = enabled === '1' ? [...new Set([...existing, name])] : existing.filter((item) => item !== name);
+  await db.run('INSERT INTO table.options (name, "user", value) VALUES (?, 0, ?) ON CONFLICT(name, "user") DO UPDATE SET value = excluded.value', ['phpPluginHooks', JSON.stringify(next)]);
+  return redirect(`${request.rootUrl}/admin/plugins.php?saved=1`);
 }
 
 async function login(db: Db, request: RequestContext, secret: string): Promise<Response> {
@@ -263,9 +306,9 @@ function loginHtml(request: RequestContext, secret: string, error = ''): string 
   return pageHtml('登录', `<main class="card"><p class="eyebrow">TYPECHO</p><h1>登录</h1><p class="muted">使用管理员账户继续。</p>${message ? `<p class="message" role="status">${escapeHtml(message)}</p>` : ''}<form method="post" action="${escapeHtml(action)}"><label>用户名或邮箱<input name="name" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><input type="hidden" name="referer" value="${escapeHtml(referer)}"><label class="remember"><input type="checkbox" name="remember" value="1">保持登录 30 天</label><button type="submit">登录</button></form><a class="back" href="${escapeHtml(request.rootUrl)}/">返回站点</a></main>`);
 }
 
-function adminHomeHtml(request: RequestContext, user: AuthUser, logoutUrl: string): string {
+function adminHomeHtml(request: RequestContext, user: AuthUser, logoutUrl: string, pluginNav = ''): string {
   const root = escapeHtml(request.rootUrl);
-  const body = `<main class="card"><p class="eyebrow">TYPECHO ADMIN</p><h1>欢迎，${escapeHtml(user.screenName || user.name)}</h1><p class="muted">管理员账户已登录。</p><nav aria-label="管理菜单"><a class="back" href="${root}/admin/manage-posts.php">管理文章</a><a class="back" href="${root}/admin/manage-pages.php">管理页面</a><a class="back" href="${root}/admin/manage-categories.php">管理分类</a><a class="back" href="${root}/admin/manage-tags.php">管理标签</a><a class="back" href="${root}/admin/manage-comments.php">审核评论</a><a class="back" href="${root}/admin/manage-medias.php">管理媒体</a><a class="back" href="${root}/admin/manage-users.php">管理用户</a><a class="back" href="${root}/admin/options-general.php">站点设置</a></nav><a class="back" href="${root}/">查看站点</a><a class="back" href="${escapeHtml(logoutUrl)}">退出登录</a></main>`;
+  const body = `<main class="card wide"><p class="eyebrow">TYPECHO ADMIN</p><h1>欢迎，${escapeHtml(user.screenName || user.name)}</h1><p class="muted">管理员账户已登录。</p><nav class="admin-nav" aria-label="管理菜单"><a class="back" href="${root}/admin/manage-posts.php">管理文章</a><a class="back" href="${root}/admin/manage-pages.php">管理页面</a><a class="back" href="${root}/admin/manage-categories.php">管理分类</a><a class="back" href="${root}/admin/manage-tags.php">管理标签</a><a class="back" href="${root}/admin/manage-comments.php">审核评论</a><a class="back" href="${root}/admin/manage-medias.php">管理媒体</a><a class="back" href="${root}/admin/manage-users.php">管理用户</a><a class="back" href="${root}/admin/options-general.php">站点设置</a><a class="back" href="${root}/admin/options-reading.php">阅读设置</a><a class="back" href="${root}/admin/options-discussion.php">评论设置</a>${user.group === 'administrator' ? `<a class="back" href="${root}/admin/plugins.php">插件 Hook</a>` : ''}${pluginNav}</nav><a class="back" href="${root}/">查看站点</a><a class="back" href="${escapeHtml(logoutUrl)}">退出登录</a></main>`;
   return pageHtml('管理后台', body);
 }
 
@@ -358,7 +401,7 @@ function currentPageUrl(request: RequestContext): string {
 }
 
 function pageHtml(title: string, body: string): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Typecho</title><style>:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#24313d;background:#f3f6f8;font-synthesis:none}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:28px}.card{width:min(100%,430px);padding:38px;background:#fff;border:1px solid #e2e8ed;border-radius:18px;box-shadow:0 18px 55px #26394b12}.card.wide{width:min(100%,640px)}.eyebrow{color:#407c69;font-size:12px;font-weight:700;letter-spacing:.18em;margin:0 0 10px}h1{font-size:28px;margin:0 0 8px}.muted{color:#697784;margin:0 0 26px}form{display:grid;gap:18px}label{display:grid;gap:7px;font-size:14px;font-weight:600}input{width:100%;border:1px solid #ccd6dd;border-radius:8px;padding:11px 12px;font:inherit;color:inherit;background:#fff}input:focus{outline:3px solid #4d9b7b30;border-color:#4d9b7b}small{font-size:12px;color:#75838d;font-weight:400}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.remember{display:flex;align-items:center;gap:9px;font-weight:400}.remember input{width:auto}.message{padding:11px 13px;color:#7c342b;background:#fff1ed;border-radius:8px;font-size:14px}button{border:0;border-radius:8px;padding:12px 16px;background:#31785f;color:#fff;font:inherit;font-weight:700;cursor:pointer}button:hover{background:#28664f}.back{display:block;text-align:center;margin-top:20px;color:#597365;text-decoration:none;font-size:14px}@media(max-width:520px){body{padding:14px}.card{padding:26px 20px}.grid{grid-template-columns:1fr;gap:18px}}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Typecho</title><style>:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#24313d;background:#f3f6f8;font-synthesis:none}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:28px}.card{width:min(100%,430px);padding:38px;background:#fff;border:1px solid #e2e8ed;border-radius:18px;box-shadow:0 18px 55px #26394b12}.card.wide{width:min(100%,640px)}.eyebrow{color:#407c69;font-size:12px;font-weight:700;letter-spacing:.18em;margin:0 0 10px}h1{font-size:28px;margin:0 0 8px}.muted{color:#697784;margin:0 0 26px}form{display:grid;gap:18px}label{display:grid;gap:7px;font-size:14px;font-weight:600}input{width:100%;border:1px solid #ccd6dd;border-radius:8px;padding:11px 12px;font:inherit;color:inherit;background:#fff}input:focus{outline:3px solid #4d9b7b30;border-color:#4d9b7b}small{font-size:12px;color:#75838d;font-weight:400}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.remember{display:flex;align-items:center;gap:9px;font-weight:400}.remember input{width:auto}.message{padding:11px 13px;color:#7c342b;background:#fff1ed;border-radius:8px;font-size:14px}button{border:0;border-radius:8px;padding:12px 16px;background:#31785f;color:#fff;font:inherit;font-weight:700;cursor:pointer}button:hover{background:#28664f}.back{display:block;text-align:center;margin-top:20px;color:#597365;text-decoration:none;font-size:14px}.admin-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.admin-nav .back{margin:0;text-align:left;padding:11px 13px;border:1px solid #dee8e3;border-radius:8px;background:#f8faf8}.admin-nav .back:hover{background:#e9f4ed;color:#24674e}@media(max-width:520px){body{padding:14px}.card{padding:26px 20px}.grid{grid-template-columns:1fr;gap:18px}.admin-nav{grid-template-columns:1fr}}</style></head><body>${body}</body></html>`;
 }
 
 function tokenCookie(request: RequestContext): string {

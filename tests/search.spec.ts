@@ -32,6 +32,14 @@ describe('theme search form', () => {
     expect(response.headers.get('location')).toBe('https://example.test/search/%E6%B5%8B%E8%AF%95%20Word/');
   });
 
+  it('accepts the search form on a missing page as the default 404 theme does', async () => {
+    const response = await renderSite(env, new Request('https://example.test/does-not-exist', {
+      method: 'POST', body: new URLSearchParams({ s: 'not found' }),
+    }));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('https://example.test/search/not%20found/');
+  });
+
   it('rejects empty search terms', async () => {
     const response = await renderSite(env, new Request('https://example.test/?s=%20'));
     expect(response.status).toBe(400);

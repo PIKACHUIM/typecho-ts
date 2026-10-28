@@ -3,22 +3,18 @@ import { PhpArray } from '../../php-compat/values';
 import { dateFormat } from '../../php-compat/date';
 import { escapeHtml, fixHtml, subStr, url as joinUrl } from '../core/common';
 import type { Db } from '../core/db';
-import { excerptHtml } from '../repo/content';
 import type { SiteOptions } from '../core/options';
 import type { RequestContext } from '../core/request';
 import {
   countContents,
-  countComments,
   findContent,
   findUser,
   listCategories,
-  listComments,
   listContents,
   listPages,
   listTags,
   loadFields,
   contentHtml,
-  type CommentRow,
   type ContentRow,
   type FieldMap,
   type MetaRow,
@@ -37,7 +33,7 @@ export interface ArchiveInit {
   type?: string;
 }
 
-type ArchiveKind = 'index' | 'post' | 'page' | 'attachment' | 'category' | 'tag' | 'author' | 'search' | 'archive' | 'front';
+type ArchiveKind = 'index' | 'post' | 'page' | 'attachment' | 'category' | 'tag' | 'author' | 'search' | 'archive' | 'date' | 'front';
 
 export class Archive implements PhpHost {
   readonly [PHP_HOST] = true as const;
@@ -60,6 +56,9 @@ export class Archive implements PhpHost {
   titleText = '';
   archiveDescription = '';
   archiveKeywords = '';
+  archiveFeedUrl = '';
+  archiveFeedRssUrl = '';
+  archiveFeedAtomUrl = '';
   themeFile = '';
   makeSinglePageAsFrontPage = false;
 
@@ -86,6 +85,12 @@ export class Archive implements PhpHost {
     this.params = init.params ?? {};
     this.pageSize = Number(init.options.text('pageSize', '10')) || 10;
     this.currentPage = Math.max(1, Number(this.params.page ?? this.request.query.get('page') ?? 1) || 1);
+    this.archiveUrl = init.options.derived.siteUrl;
+    this.archiveDescription = init.options.text('description');
+    this.archiveKeywords = init.options.text('keywords');
+    this.archiveFeedUrl = init.options.derived.feedUrl;
+    this.archiveFeedRssUrl = init.options.derived.feedRssUrl;
+    this.archiveFeedAtomUrl = init.options.derived.feedAtomUrl;
   }
 
   async ensureLoaded(): Promise<void> {
@@ -102,9 +107,16 @@ export class Archive implements PhpHost {
       const frontPage = String(this.options.get('frontPage') ?? '');
       if (frontPage.startsWith('page:')) {
         const cid = Number(frontPage.slice(5));
-        await this.loadSingle({ cid, type: 'page' });
         this.makeSinglePageAsFrontPage = true;
+        await this.loadSingle({ cid, type: 'page' });
         return;
+      }
+      if (frontPage.startsWith('file:')) {
+        const file = frontPage.slice(5);
+        if (/^[a-zA-Z0-9_-]+\.php$/.test(file)) {
+          this.themeFile = file;
+          return;
+        }
       }
       await this.loadList({ type: 'post' }, 'index');
       this.archiveUrl = this.options.router.url(route === 'index_page' ? 'index_page' : 'index', { page: String(this.currentPage) }, this.options.derived.index);
@@ -130,7 +142,8 @@ export class Archive implements PhpHost {
       if (!meta) this.notFound = true;
       this.titleText = meta?.name ?? '';
       this.archiveDescription = meta?.description ?? '';
-      this.archiveUrl = this.options.router.url(route, { slug, page: String(this.currentPage) }, this.options.derived.index);
+      this.archiveKeywords = meta?.name ?? '';
+      this.archiveUrl = this.options.router.url('category', { slug }, this.options.derived.index);
       return;
     }
 
@@ -142,7 +155,9 @@ export class Archive implements PhpHost {
       const meta = metas.find((m) => m.slug === slug);
       if (!meta) this.notFound = true;
       this.titleText = meta?.name ?? '';
-      this.archiveUrl = this.options.router.url(route, { slug, page: String(this.currentPage) }, this.options.derived.index);
+      this.archiveDescription = meta?.description ?? '';
+      this.archiveKeywords = meta?.name ?? '';
+      this.archiveUrl = this.options.router.url('tag', { slug }, this.options.derived.index);
       return;
     }
 
@@ -177,9 +192,16 @@ export class Archive implements PhpHost {
       const year = Number(this.params.year ?? 0);
       const month = this.params.month ? Number(this.params.month) : undefined;
       const day = this.params.day ? Number(this.params.day) : undefined;
-      await this.loadList({ year, month, day }, 'archive');
-      this.archiveSlug = [year, month, day].filter(Boolean).join('/');
-      this.archiveUrl = this.options.router.url(route, { ...this.params }, this.options.derived.index);
+      if (!Number.isInteger(year) || year < 1 || year > 9999 || (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) || (day !== undefined && (month === undefined || !Number.isInteger(day) || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()))) {
+        this.notFound = true;
+        return;
+      }
+      await this.loadList({ year, month, day }, 'date');
+      this.archiveSlug = day ? 'day' : month ? 'month' : 'year';
+      this.titleText = `${year}年${month ? `${month}月` : ''}${day ? `${day}日` : ''}`;
+      const baseRoute = route.replace(/_page$/, '');
+      const dateParams = { year: String(year).padStart(4, '0'), month: String(month ?? '').padStart(2, '0'), day: String(day ?? '').padStart(2, '0') };
+      this.archiveUrl = this.options.router.url(baseRoute, dateParams, this.options.derived.index);
       return;
     }
 
@@ -197,8 +219,9 @@ export class Archive implements PhpHost {
     this.archiveSingle = false;
     const limit = this.pageSize;
     const offset = (this.currentPage - 1) * limit;
-    this.posts = await listContents(this.db, { ...query, limit, offset });
-    this.total = await countContents(this.db, query);
+    const filters = kind === 'date' ? { ...query, timezoneOffset: Number(this.options.get('timezone') ?? 0) } : query;
+    this.posts = await listContents(this.db, { ...filters, limit, offset });
+    this.total = await countContents(this.db, filters);
     if (this.currentPage > 1 && this.posts.length === 0) this.notFound = true;
     this.index = -1;
     this.currentRow = null;
@@ -225,7 +248,12 @@ export class Archive implements PhpHost {
     this.archiveUrl = router.url(routeName, row.type === 'page' ? { slug: row.slug ?? '' } : { cid: String(row.cid) }, this.options.derived.index);
     this.themeFile = row.template && /^[a-zA-Z0-9_-]+\.php$/.test(row.template) ? row.template : '';
     if (row.type === 'post' || row.type === 'page' || row.type === 'attachment') {
-      this.titleText = row.title ?? '';
+      if (!this.makeSinglePageAsFrontPage) {
+        this.titleText = row.title ?? '';
+        const plainText = contentHtml(row).split('<!--more-->')[0].replace(/<[^>]*>/g, '').trim().replace(/\n/g, '');
+        this.archiveDescription = subStr(plainText || row.title || '', 0, 100);
+        this.archiveKeywords = (await listTags(this.db, row.cid)).map((tag) => tag.name).join(',');
+      }
     }
   }
 
@@ -432,7 +460,7 @@ export class Archive implements PhpHost {
     return undefined;
   }
 
-  async archiveTitle(defines: unknown = [], before = '', end = ' - '): Promise<void> {
+  async archiveTitle(defines: unknown = [], before = ' &raquo; ', end = ''): Promise<void> {
     await this.ensureLoaded();
     if (!this.titleText) return;
     let template = '%s';
@@ -440,7 +468,7 @@ export class Archive implements PhpHost {
       const defined = defines.get(this.archiveType);
       if (defined) template = String(defined);
     }
-    const title = this.archiveType === 'search' ? escapeHtml(this.titleText) : String(this.titleText ?? '');
+    const title = escapeHtml(this.titleText);
     this.echo(`${String(before)}${template.replace('%s', title)}${String(end)}`);
   }
 
@@ -459,9 +487,9 @@ export class Archive implements PhpHost {
       template: o.text('theme'),
       pingback: o.derived.xmlRpcUrl,
       xmlrpc: `${o.derived.xmlRpcUrl}?rsd`,
-      rss2: this.archiveFeedUrl(),
-      rss1: this.archiveFeedRssUrl(),
-      atom: this.archiveFeedAtomUrl(),
+      rss2: escapeHtml(this.archiveFeedUrl),
+      rss1: escapeHtml(this.archiveFeedRssUrl),
+      atom: escapeHtml(this.archiveFeedAtomUrl),
       social: '1',
     };
     const allowFeed = !this.is('single') || (await this.allow('feed')) || this.makeSinglePageAsFrontPage;
@@ -490,46 +518,50 @@ export class Archive implements PhpHost {
     this.echo(header);
   }
 
-  private archiveFeedUrl(): string {
-    return this.options.derived.feedUrl;
-  }
-
-  private archiveFeedRssUrl(): string {
-    return this.options.derived.feedRssUrl;
-  }
-
-  private archiveFeedAtomUrl(): string {
-    return this.options.derived.feedAtomUrl;
-  }
-
   async footer(): Promise<void> {
     // footer plugin hook
   }
 
-  async pageNav(prev = '&laquo;', next = '&raquo;', splitPage = 3, splitWord = '...'): Promise<void> {
+  async pageNav(prev = '&laquo;', next = '&raquo;', splitPage = 3, splitWord = '...', config?: unknown): Promise<void> {
     await this.ensureLoaded();
     if (this.total <= this.pageSize) return;
+    const template = config instanceof PhpArray ? config.toObject()
+      : typeof config === 'string' ? Object.fromEntries(new URLSearchParams(config))
+      : config && typeof config === 'object' ? config as Record<string, unknown> : {};
+    const tag = (value: unknown, fallback: string): string => {
+      const name = String(value ?? fallback);
+      return /^(?:ol|ul|li|div|span|nav)$/.test(name) ? name : fallback;
+    };
+    const wrapTag = tag(template.wrapTag, 'ol');
+    const itemTag = tag(template.itemTag, 'li');
+    const textTag = tag(template.textTag, 'span');
+    const wrapClass = escapeHtml(template.wrapClass ?? 'page-navigator');
+    const currentClass = escapeHtml(template.currentClass ?? 'current');
+    const prevClass = escapeHtml(template.prevClass ?? 'prev');
+    const nextClass = escapeHtml(template.nextClass ?? 'next');
+    const label = (text: string) => escapeHtml(text).replace(/&amp;(laquo|raquo|hellip|nbsp);/g, '&$1;');
+    const link = (page: number, text: string) => `<a href="${escapeHtml(this.pageUrl(page))}">${text}</a>`;
+    const item = (html: string, className = '') => `<${itemTag}${className ? ` class="${className}"` : ''}>${html}</${itemTag}>`;
     const totalPage = Math.max(1, Math.ceil(this.total / this.pageSize));
     const current = this.currentPage;
-    const from = Math.max(1, current - splitPage);
-    const to = Math.min(totalPage, current + splitPage);
-    const parts: string[] = [`<ol class="page-navigator">`];
-    const link = (page: number) => this.pageUrl(page);
+    const from = Math.max(1, current - Math.max(0, splitPage));
+    const to = Math.min(totalPage, current + Math.max(0, splitPage));
+    const parts: string[] = [`<${wrapTag}${wrapClass ? ` class="${wrapClass}"` : ''}>`];
 
-    if (current > 1) parts.push(`<li class="prev"><a href="${link(current - 1)}">${prev}</a></li>`);
+    if (current > 1) parts.push(item(link(current - 1, label(prev)), prevClass));
     if (from > 1) {
-      parts.push(`<li><a href="${link(1)}">1</a></li>`);
-      if (from > 2) parts.push(`<li><span>${splitWord}</span></li>`);
+      parts.push(item(link(1, '1')));
+      if (from > 2) parts.push(item(`<${textTag}>${label(splitWord)}</${textTag}>`));
     }
     for (let i = from; i <= to; i++) {
-      parts.push(i === current ? `<li class="current"><a href="${link(i)}">${i}</a></li>` : `<li><a href="${link(i)}">${i}</a></li>`);
+      parts.push(item(link(i, String(i)), i === current ? currentClass : ''));
     }
     if (to < totalPage) {
-      if (to < totalPage - 1) parts.push(`<li><span>${splitWord}</span></li>`);
-      parts.push(`<li><a href="${link(totalPage)}">${totalPage}</a></li>`);
+      if (to < totalPage - 1) parts.push(item(`<${textTag}>${label(splitWord)}</${textTag}>`));
+      parts.push(item(link(totalPage, String(totalPage))));
     }
-    if (current < totalPage) parts.push(`<li class="next"><a href="${link(current + 1)}">${next}</a></li>`);
-    parts.push('</ol>');
+    if (current < totalPage) parts.push(item(link(current + 1, label(next)), nextClass));
+    parts.push(`</${wrapTag}>`);
     this.echo(parts.join(''));
   }
 
@@ -641,6 +673,16 @@ export class Archive implements PhpHost {
         return this.archiveSlug;
       case 'archiveUrl':
         return this.archiveUrl;
+      case 'archiveDescription':
+        return this.archiveDescription;
+      case 'archiveKeywords':
+        return this.archiveKeywords;
+      case 'archiveFeedUrl':
+        return this.archiveFeedUrl;
+      case 'archiveFeedRssUrl':
+        return this.archiveFeedRssUrl;
+      case 'archiveFeedAtomUrl':
+        return this.archiveFeedAtomUrl;
       case 'themeFile':
         return this.themeFile;
       case 'title':

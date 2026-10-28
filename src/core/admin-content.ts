@@ -6,6 +6,8 @@ import { currentRequestUrl, type RequestContext } from './request';
 
 const CONTENT_TYPES = ['post', 'page'] as const;
 type ContentType = (typeof CONTENT_TYPES)[number];
+type TaxonomyType = 'category' | 'tag';
+interface Taxonomy { mid: number; name: string; type: TaxonomyType }
 
 export async function handleAdminContentRequest(db: Db, request: RequestContext, secret: string): Promise<Response | null> {
   const path = request.pathInfo.replace(/\/+$/, '') || '/';
@@ -35,7 +37,12 @@ export async function handleAdminContentRequest(db: Db, request: RequestContext,
       if (!row) return textResponse('Content not found', 404);
     } else if (request.query.has('cid')) return textResponse('Invalid content ID', 400);
     const action = `${request.rootUrl}/action/contents-${editType}-edit?_=${securityToken(secret, currentRequestUrl(request), user)}`;
-    return htmlResponse(contentEditorPage(request, row, editType, action));
+    const metas = editType === 'post' ? await getTaxonomies(db) : [];
+    const selected = row && editType === 'post'
+      ? (await db.all<{ mid: number }>('SELECT mid FROM table.relationships WHERE cid = ?', [row.cid])).map((item) => Number(item.mid))
+      : [];
+    const defaultCategory = editType === 'post' ? await getDefaultCategoryId(db, metas) : null;
+    return htmlResponse(contentEditorPage(request, row, editType, action, metas, selected, defaultCategory));
   }
 
   const saveMatch = /^\/action\/contents-(post|page)-edit$/.exec(path);
@@ -88,33 +95,59 @@ async function saveContent(db: Db, request: RequestContext, form: FormData, user
   if (!/^[A-Za-z0-9_-]{1,150}$/.test(slug)) return textResponse('Slug must contain only letters, numbers, hyphens, and underscores.', 400);
   if (!['publish', 'draft', 'private'].includes(status)) return textResponse('Invalid content status', 400);
   if (new TextEncoder().encode(text).length > 1024 * 1024) return textResponse('Content exceeds 1 MB.', 413);
+  const existing = cid ? await db.first<{ cid: number }>('SELECT cid FROM table.contents WHERE cid = ? AND type = ?', [cid, type]) : null;
+  if (cid && !existing) return textResponse('Content not found', 404);
   const conflict = await db.first<{ cid: number }>('SELECT cid FROM table.contents WHERE slug = ? AND cid != ?', [slug, cid]);
   if (conflict) return textResponse('Slug already exists.', 409);
-  const now = Math.floor(Date.now() / 1000);
-  let targetCid = cid;
-  if (cid) {
-    const existing = await db.first<{ cid: number }>('SELECT cid FROM table.contents WHERE cid = ? AND type = ?', [cid, type]);
-    if (!existing) return textResponse('Content not found', 404);
-    await db.run('UPDATE table.contents SET title = ?, slug = ?, modified = ?, text = ?, status = ?, allowComment = ? WHERE cid = ? AND type = ?',
-      [title, slug, now, text, status, allowComment, cid, type]);
-  } else {
-    const result = await db.first<{ cid: number }>(
-      `INSERT INTO table.contents (title, slug, created, modified, text, "order", authorId, template, type, status, password, commentsNum, allowComment, allowPing, allowFeed, parent)
-       VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, NULL, 0, ?, '1', '1', 0) RETURNING cid`,
-      [title, slug, now, now, text, user.uid, type, status, allowComment]
-    );
-    targetCid = Number(result?.cid ?? 0);
-    if (!targetCid) return textResponse('Could not save content.', 500);
-    if (type === 'post') {
-      const category = await db.first<{ mid: number }>("SELECT mid FROM table.metas WHERE type = 'category' ORDER BY mid LIMIT 1");
-      if (category) {
-        await db.batch([
-          { sql: 'INSERT INTO table.relationships (cid, mid) VALUES (?, ?)', params: [targetCid, category.mid] },
-          { sql: 'UPDATE table.metas SET count = count + 1 WHERE mid = ?', params: [category.mid] },
-        ]);
-      }
+
+  let selected: number[] = [];
+  let previous: number[] = [];
+  if (type === 'post') {
+    const categories = parseIds(form.getAll('category[]'));
+    const tags = parseIds(form.getAll('tags[]'));
+    if (!categories || !tags) return textResponse('Invalid category or tag ID', 400);
+    const metas = await getTaxonomies(db);
+    const byId = new Map(metas.map((meta) => [Number(meta.mid), meta.type]));
+    if (categories.some((mid) => byId.get(mid) !== 'category') || tags.some((mid) => byId.get(mid) !== 'tag')) {
+      return textResponse('Category or tag not found', 400);
+    }
+    if (categories.length === 0) {
+      const defaultMid = await getDefaultCategoryId(db, metas);
+      if (defaultMid !== null) categories.push(defaultMid);
+    }
+    selected = [...categories, ...tags];
+    if (cid) {
+      previous = (await db.all<{ mid: number }>(
+        "SELECT r.mid FROM table.relationships r JOIN table.metas m ON m.mid = r.mid WHERE r.cid = ? AND m.type IN ('category', 'tag')", [cid]
+      )).map((row) => Number(row.mid));
     }
   }
+
+  const now = Math.floor(Date.now() / 1000);
+  const statements: Array<{ sql: string; params: unknown[] }> = [];
+  if (cid) {
+    statements.push({ sql: 'UPDATE table.contents SET title = ?, slug = ?, modified = ?, text = ?, status = ?, allowComment = ? WHERE cid = ? AND type = ?', params: [title, slug, now, text, status, allowComment, cid, type] });
+  } else {
+    statements.push({
+      sql: `INSERT INTO table.contents (title, slug, created, modified, text, "order", authorId, template, type, status, password, commentsNum, allowComment, allowPing, allowFeed, parent)
+       VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, NULL, 0, ?, '1', '1', 0)`,
+      params: [title, slug, now, now, text, user.uid, type, status, allowComment],
+    });
+  }
+  const removed = previous.filter((mid) => !selected.includes(mid));
+  const added = selected.filter((mid) => !previous.includes(mid));
+  for (const mid of removed) statements.push({ sql: 'DELETE FROM table.relationships WHERE cid = ? AND mid = ?', params: [cid, mid] });
+  for (const mid of added) {
+    statements.push(cid
+      ? { sql: 'INSERT INTO table.relationships (cid, mid) VALUES (?, ?)', params: [cid, mid] }
+      : { sql: "INSERT INTO table.relationships (cid, mid) SELECT cid, ? FROM table.contents WHERE slug = ? AND type = 'post'", params: [mid, slug] });
+  }
+  for (const mid of [...removed, ...added]) {
+    statements.push({ sql: 'UPDATE table.metas SET count = (SELECT COUNT(*) FROM table.relationships WHERE mid = ?) WHERE mid = ?', params: [mid, mid] });
+  }
+  const result = await db.batch(statements);
+  const targetCid = cid || Number(result[0]?.meta.last_row_id ?? 0);
+  if (!targetCid) return textResponse('Could not save content.', 500);
   return redirect(`${request.rootUrl}/admin/write-${type}.php?cid=${targetCid}&saved=1`);
 }
 
@@ -124,14 +157,40 @@ async function deleteContent(db: Db, request: RequestContext, form: FormData, ty
   const cid = Number(rawCid);
   const existing = await db.first<{ cid: number }>('SELECT cid FROM table.contents WHERE cid = ? AND type = ?', [cid, type]);
   if (!existing) return textResponse('Content not found', 404);
-  await db.batch([
-    { sql: 'UPDATE table.metas SET count = MAX(0, count - 1) WHERE mid IN (SELECT mid FROM table.relationships WHERE cid = ?)', params: [cid] },
+  const related = await db.all<{ mid: number }>('SELECT mid FROM table.relationships WHERE cid = ?', [cid]);
+  const statements: Array<{ sql: string; params: unknown[] }> = [
     { sql: 'DELETE FROM table.relationships WHERE cid = ?', params: [cid] },
     { sql: 'DELETE FROM table.fields WHERE cid = ?', params: [cid] },
     { sql: 'DELETE FROM table.comments WHERE cid = ?', params: [cid] },
     { sql: 'DELETE FROM table.contents WHERE cid = ? AND type = ?', params: [cid, type] },
-  ]);
+  ];
+  for (const mid of new Set(related.map((item) => Number(item.mid)))) {
+    statements.push({ sql: 'UPDATE table.metas SET count = (SELECT COUNT(*) FROM table.relationships WHERE mid = ?) WHERE mid = ?', params: [mid, mid] });
+  }
+  await db.batch(statements);
   return redirect(`${request.rootUrl}/admin/manage-${type === 'post' ? 'posts' : 'pages'}.php?deleted=1`);
+}
+
+function parseIds(values: ReturnType<FormData['getAll']>): number[] | null {
+  if (values.length > 100) return null;
+  const ids: number[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) return null;
+    if (!ids.includes(Number(value))) ids.push(Number(value));
+  }
+  return ids;
+}
+
+async function getTaxonomies(db: Db): Promise<Taxonomy[]> {
+  return db.all<Taxonomy>("SELECT mid, name, type FROM table.metas WHERE type IN ('category', 'tag') ORDER BY type, \"order\", mid");
+}
+
+async function getDefaultCategoryId(db: Db, metas: Taxonomy[]): Promise<number | null> {
+  const categories = metas.filter((item) => item.type === 'category');
+  const option = await db.first<{ value: string }>("SELECT value FROM table.options WHERE name = 'defaultCategory' AND \"user\" = 0");
+  const configured = Number(option?.value);
+  return categories.some((item) => Number(item.mid) === configured)
+    ? configured : categories.reduce<number | null>((first, item) => first === null ? Number(item.mid) : Math.min(first, Number(item.mid)), null);
 }
 
 function contentListPage(request: RequestContext, rows: ContentRow[], type: ContentType, user: AuthUser, secret: string, page: number): string {
@@ -149,11 +208,19 @@ function contentListPage(request: RequestContext, rows: ContentRow[], type: Cont
   return adminPage(`${title}管理`, request, body);
 }
 
-function contentEditorPage(request: RequestContext, row: ContentRow | null, type: ContentType, action: string): string {
+function contentEditorPage(request: RequestContext, row: ContentRow | null, type: ContentType, action: string, metas: Taxonomy[], selected: number[], defaultCategory: number | null): string {
   const noun = type === 'post' ? '文章' : '页面';
   const status = row?.status ?? 'publish';
   const option = (value: string, label: string) => `<option value="${value}"${status === value ? ' selected' : ''}>${label}</option>`;
-  const body = `<h1>${row ? '编辑' : '新建'}${noun}</h1>${request.query.has('saved') ? '<p role="status">已保存。</p>' : ''}<form method="post" action="${escapeHtml(action)}"><input type="hidden" name="cid" value="${row?.cid ?? 0}"><label>标题<input required maxlength="150" name="title" value="${escapeHtml(row?.title ?? '')}"></label><label>缩略名<input maxlength="150" name="slug" value="${escapeHtml(row?.slug ?? '')}" placeholder="留空自动生成"></label><label>正文<textarea rows="18" name="text">${escapeHtml(row?.text ?? '<!--markdown-->')}</textarea></label><label>状态<select name="status">${option('publish', '公开')}${option('draft', '草稿')}${option('private', '私密')}</select></label><label class="check"><input type="checkbox" name="allowComment" value="1"${row?.allowComment === '1' || !row ? ' checked' : ''}>允许评论</label><button type="submit">保存${noun}</button></form>`;
+  const taxonomyControls = type === 'post' ? (['category', 'tag'] as const).map((kind) => {
+    const choices = metas.filter((meta) => meta.type === kind).map((meta) => {
+      const mid = Number(meta.mid);
+      const checked = row ? selected.includes(mid) : kind === 'category' && mid === defaultCategory;
+      return `<label class="check"><input type="checkbox" name="${kind === 'category' ? 'category[]' : 'tags[]'}" value="${mid}"${checked ? ' checked' : ''}>${escapeHtml(meta.name)}${kind === 'category' && mid === defaultCategory ? '（默认分类）' : ''}</label>`;
+    }).join('');
+    return `<fieldset><legend>${kind === 'category' ? '分类' : '标签'}</legend>${choices || `<p>暂无${kind === 'category' ? '分类' : '标签'}</p>`}</fieldset>`;
+  }).join('') : '';
+  const body = `<h1>${row ? '编辑' : '新建'}${noun}</h1>${request.query.has('saved') ? '<p role="status">已保存。</p>' : ''}<form method="post" action="${escapeHtml(action)}"><input type="hidden" name="cid" value="${row?.cid ?? 0}"><label>标题<input required maxlength="150" name="title" value="${escapeHtml(row?.title ?? '')}"></label><label>缩略名<input maxlength="150" name="slug" value="${escapeHtml(row?.slug ?? '')}" placeholder="留空自动生成"></label><label>正文<textarea rows="18" name="text">${escapeHtml(row?.text ?? '<!--markdown-->')}</textarea></label>${taxonomyControls}<label>状态<select name="status">${option('publish', '公开')}${option('draft', '草稿')}${option('private', '私密')}</select></label><label class="check"><input type="checkbox" name="allowComment" value="1"${row?.allowComment === '1' || !row ? ' checked' : ''}>允许评论</label><button type="submit">保存${noun}</button></form>`;
   return adminPage(`${row ? '编辑' : '新建'}${noun}`, request, body);
 }
 

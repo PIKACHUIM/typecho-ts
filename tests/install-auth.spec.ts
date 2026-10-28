@@ -95,6 +95,7 @@ describe('first-run installer', () => {
     expect(await compare('secure-pass-123', String(userInsert?.params[1]))).toBe(true);
     expect(optionsInsert.some(({ params }) => params[0] === 'title' && params[1] === 'Example Site')).toBe(true);
     expect(optionsInsert.some(({ params }) => params[0] === 'installed' && params[1] === '1')).toBe(true);
+    expect(optionsInsert.some(({ params }) => params[0] === 'phpPluginHooks' && params[1] === '[]')).toBe(true);
     const routes = JSON.parse(String(optionsInsert.find(({ params }) => params[0] === 'routingTable')?.params[1]));
     const router = Router.from(routes);
     expect(router.routes).toHaveLength(25);

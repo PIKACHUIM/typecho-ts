@@ -1,3 +1,5 @@
+// @ts-expect-error This test uses Node's built-in SQLite; Worker tsconfig intentionally excludes Node types.
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import type { PhpHost } from '../php-compat/host';
 import type { AuthUser } from '../src/core/auth';
@@ -31,6 +33,24 @@ function publicDb(row: ContentRow | null = null) {
     db: { first, all: vi.fn(async () => []), count: vi.fn(async () => 0) } as unknown as Db,
     first,
   };
+}
+
+function sqliteContentDb() {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE contents (cid INTEGER PRIMARY KEY, title TEXT, text TEXT, type TEXT, status TEXT, created INTEGER, password TEXT);
+    CREATE TABLE metas (mid INTEGER PRIMARY KEY, slug TEXT, type TEXT, parent INTEGER);
+    CREATE TABLE relationships (cid INTEGER, mid INTEGER);
+  `);
+  const prepare = (sql: string) => sqlite.prepare(sql.replaceAll('table.', ''));
+  const db = {
+    all: async (sql: string, params: unknown[]) => prepare(sql).all(...params as (string | number | null)[]),
+    count: async (sql: string, params: unknown[]) => Number((prepare(sql).get(...params as (string | number | null)[]) as { num: number }).num),
+  } as unknown as Db;
+  const addContent = (cid: number, title: string, text: string | null = null, created = 1_700_000_000, status = 'publish', password: string | null = null) => {
+    sqlite.prepare('INSERT INTO contents VALUES (?, ?, ?, ?, ?, ?, ?)').run(cid, title, text, 'post', status, created, password);
+  };
+  return { sqlite, db, addContent };
 }
 
 function archive(db: Db, type: string, params?: Record<string, string>, values: OptionValues = siteValues(), echo: (value: unknown) => void = () => {}) {
@@ -104,6 +124,81 @@ describe('public content queries', () => {
     expect(all.mock.calls[2][1]).toEqual([expect.any(Number), 5]);
     expect(all.mock.calls[3][1]).toEqual([12, expect.any(Number)]);
   });
+
+  it('includes descendants of a category without duplicating articles, but keeps tags direct', async () => {
+    const { sqlite, db, addContent } = sqliteContentDb();
+    try {
+      const metas = sqlite.prepare('INSERT INTO metas VALUES (?, ?, ?, ?)');
+      for (const meta of [
+        [1, 'parent', 'category', 0], [2, 'child', 'category', 1],
+        [3, 'grandchild', 'category', 2], [4, 'unrelated', 'category', 0],
+        [5, 'tag', 'tag', 1],
+      ] as const) metas.run(...meta);
+      const relation = sqlite.prepare('INSERT INTO relationships VALUES (?, ?)');
+      for (const [cid, mid] of [[1, 1], [2, 2], [3, 3], [3, 1], [4, 4], [5, 5], [6, 3], [7, 3], [8, 3]]) relation.run(cid, mid);
+      for (const cid of [1, 2, 3, 4, 5]) addContent(cid, `article ${cid}`);
+      addContent(6, 'draft', null, 1_700_000_000, 'draft');
+      addContent(7, 'future', null, 2_000_000_000);
+      addContent(8, 'private', null, 1_700_000_000, 'publish', 'secret');
+      expect((await listContents(db, { categorySlug: 'parent' })).map((row) => row.cid)).toEqual([3, 2, 1]);
+      expect(await countContents(db, { categorySlug: 'parent' })).toBe(3);
+      expect((await listContents(db, { categorySlug: 'child' })).map((row) => row.cid)).toEqual([3, 2]);
+      expect((await listContents(db, { tagSlug: 'tag' })).map((row) => row.cid)).toEqual([5]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('finds ordered search words separated by arbitrarily long text without LIKE patterns', async () => {
+    const { sqlite, db, addContent } = sqliteContentDb();
+    try {
+      addContent(1, `alpha ${'中'.repeat(70)} beta`);
+      addContent(2, 'beta ... alpha');
+      addContent(3, 'alpha', 'beta');
+      addContent(4, 'unrelated', `alpha ${'中'.repeat(70)} beta`);
+      addContent(5, 'alpha beta', null, 1_700_000_000, 'draft');
+      expect((await listContents(db, { keywords: 'alpha   beta' })).map((row) => row.cid)).toEqual([4, 1]);
+      expect(await countContents(db, { keywords: 'alpha   beta' })).toBe(2);
+      expect((await listContents(db, { keywords: 'beta alpha' })).map((row) => row.cid)).toEqual([2]);
+      addContent(6, '界'.repeat(60));
+      expect((await listContents(db, { keywords: '界'.repeat(30) })).map((row) => row.cid)).toEqual([6]);
+      const manyWords = Array.from({ length: 60 }, (_, index) => `word${index}`);
+      addContent(7, manyWords.join(' -- '));
+      expect((await listContents(db, { keywords: manyWords.join(' ') })).map((row) => row.cid)).toEqual([7]);
+      const all = vi.fn(async (_sql: string, _params: unknown[]) => []);
+      await listContents({ all } as unknown as Db, { keywords: 'alpha beta' });
+      expect(all.mock.calls[0][0]).not.toMatch(/\bLIKE\b/i);
+      expect(all.mock.calls[0][1]).toEqual(['post', 'publish', expect.any(Number), '["alpha","beta"]', '["alpha","beta"]', 10, 0]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('uses the site timezone for inclusive start and exclusive end of day, month and year', async () => {
+    const { sqlite, db, addContent } = sqliteContentDb();
+    try {
+      const start = Date.UTC(2024, 0, 1) / 1000 - 28800;
+      const end = Date.UTC(2024, 0, 2) / 1000 - 28800;
+      addContent(1, 'just before', null, start - 1);
+      addContent(2, 'start of local day', null, start);
+      addContent(3, 'end of local day', null, end - 1);
+      addContent(4, 'next local day', null, end);
+      const date = { year: 2024, month: 1, day: 1, timezoneOffset: 28800 };
+      expect((await listContents(db, date)).map((row) => row.cid)).toEqual([3, 2]);
+      expect(await countContents(db, date)).toBe(2);
+      expect((await listContents(db, { year: 2024, month: 1, timezoneOffset: 28800 })).map((row) => row.cid)).toEqual([4, 3, 2]);
+      addContent(7, 'start of local February', null, Date.UTC(2024, 1, 1) / 1000 - 28800);
+      addContent(8, 'start of next local year', null, Date.UTC(2025, 0, 1) / 1000 - 28800);
+      expect((await listContents(db, { year: 2024, month: 1, timezoneOffset: 28800 })).map((row) => row.cid)).toEqual([4, 3, 2]);
+      expect((await listContents(db, { year: 2024, timezoneOffset: 28800 })).map((row) => row.cid)).toEqual([7, 4, 3, 2]);
+      const westernStart = Date.UTC(2024, 0, 1, 5) / 1000;
+      addContent(5, 'west before', null, westernStart - 1);
+      addContent(6, 'west start', null, westernStart);
+      expect((await listContents(db, { year: 2024, month: 1, day: 1, timezoneOffset: -18000 })).map((row) => row.cid)).toEqual([4, 3, 6]);
+    } finally {
+      sqlite.close();
+    }
+  });
 });
 
 describe('archive visibility', () => {
@@ -144,7 +239,7 @@ describe('archive visibility', () => {
   });
 
   it('distinguishes an empty category from a nonexistent category', async () => {
-    const all = vi.fn(async (sql: string) => sql.includes('FROM table.metas')
+    const all = vi.fn(async (sql: string) => sql.startsWith('SELECT * FROM table.metas')
       ? [{ mid: 1, slug: 'empty', name: 'Empty', type: 'category', description: null }]
       : []);
     const db = { all, count: vi.fn(async () => 0) } as unknown as Db;
@@ -163,7 +258,7 @@ describe('archive visibility', () => {
     const encoded = '%E6%B5%8B%E8%AF%95%20A%26B';
     const view = archive(db, 'search', { keywords: encoded });
     await view.ensureLoaded();
-    expect(all.mock.calls[0][1]).toContain('测试 A&B');
+    expect(all.mock.calls[0][1]).toContain('["测试","A&B"]');
     expect(view.archiveSlug).toBe('测试 A&B');
     expect(view.archiveUrl).toBe(`http://example.com/search/${encoded}/`);
   });
