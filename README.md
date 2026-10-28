@@ -12,7 +12,7 @@
 
 空白 D1 数据库首次访问会进入初始化向导，可以设置站点信息并创建管理员账户；`/admin/login.php` 提供登录与会话。后台目前提供基础文章和页面管理、分类标签、评论审核、用户资料与站点设置，以及图片附件管理；前台提供搜索、评论提交和 RSS/Atom。内置 `HelloWorld` 插件可在 `/admin/plugins.php` 按需启用，PHP Hook 目前仅覆盖后台菜单；任意第三方插件、主题语法和扩展 API、其他后台页面、XML-RPC 与数据导入仍未对齐。**请先用于体验和验证，不要承载重要数据。**
 
-[使用文档与教程](docs/index.md) · [查看源码](https://github.com/PIKACHUIM/typecho-ts)
+[在线文档](https://pikachuim.github.io/typecho-ts/) · [文档源码](docs/index.md) · [查看源码](https://github.com/PIKACHUIM/typecho-ts)
 
 ## 它是怎么工作的
 

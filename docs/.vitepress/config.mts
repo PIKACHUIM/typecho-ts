@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitepress';
 
+// GitHub Pages 项目站点需要子路径前缀，本地开发与根域名部署保持 '/'。
+const base = globalThis.process?.env?.DOCS_BASE || '/';
+
 export default defineConfig({
+  base,
   lang: 'zh-CN',
   title: 'Typecho on Workers',
   description: '在 Cloudflare Workers 上运行的 Typecho 移植项目使用指南',
