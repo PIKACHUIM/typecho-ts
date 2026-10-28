@@ -1,0 +1,32 @@
+{
+  "name": "typecho-work",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typecho ported to Hono on Cloudflare Workers (D1 + R2)",
+  "scripts": {
+    "gen": "node scripts/gen-themes.mjs",
+    "predev": "npm run gen",
+    "dev": "wrangler dev",
+    "predeploy": "npm run gen",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:local": "wrangler d1 migrations apply typecho --local",
+    "db:migrate:remote": "wrangler d1 migrations apply typecho --remote",
+    "db:seed:local": "wrangler d1 execute typecho --local --file=scripts/seed-local.sql"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "fflate": "^0.8.3",
+    "hono": "^4.13.14",
+    "php-parser": "^3.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261027.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.153.0"
+  }
+}

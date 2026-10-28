@@ -1,0 +1,24 @@
+name = "typecho-work"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Theme/plugin PHP sources are bundled into the worker, so static assets stay
+# limited to css/js/img. `/usr/uploads/*` is served from R2 by the worker.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "typecho"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "typecho-files"
+
+[observability]
+enabled = true

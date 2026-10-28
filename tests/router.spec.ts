@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest';
+import { Router } from '../src/core/router';
+import { DEFAULT_ROUTING_TABLE } from './helpers/render-theme';
+import { subStr, url, fixHtml } from '../src/core/common';
+
+describe('Router (Typecho routing table port)', () => {
+  const router = Router.from(DEFAULT_ROUTING_TABLE);
+
+  it('matches the index route', () => {
+    const match = router.match('/');
+    expect(match?.route.name).toBe('index');
+    expect(match?.params).toBeNull();
+  });
+
+  it('matches post routes and extracts cid', () => {
+    const match = router.match('/archives/42/');
+    expect(match?.route.name).toBe('post');
+    expect(match?.params).toEqual({ cid: '42' });
+  });
+
+  it('matches paginated category routes in order', () => {
+    const match = router.match('/category/default/2/');
+    expect(match?.route.name).toBe('category_page');
+    expect(match?.params).toEqual({ slug: 'default', page: '2' });
+  });
+
+  it('builds urls from the format string', () => {
+    expect(router.url('post', { cid: '42' }, 'http://example.com')).toBe('http://example.com/archives/42/');
+    expect(router.url('index', null, 'http://example.com')).toBe('http://example.com/');
+    expect(router.url('category', { slug: 'default' }, 'http://example.com')).toBe('http://example.com/category/default/');
+    expect(router.url('index_page', { page: '3' }, 'http://example.com')).toBe('http://example.com/page/3/');
+  });
+
+  it('leaves unknown params as placeholders', () => {
+    expect(router.url('post', null, 'http://example.com')).toBe('http://example.com/archives/{cid}/');
+  });
+});
+
+describe('Common helpers', () => {
+  it('joins urls like Typecho\\Common::url', () => {
+    expect(url(null, 'http://example.com')).toBe('http://example.com/');
+    expect(url('a/b', 'http://example.com/')).toBe('http://example.com/a/b');
+    expect(url('/a//b', 'http://example.com')).toBe('http://example.com/a/b');
+  });
+
+  it('truncates multibyte strings', () => {
+    expect(subStr('你好世界', 0, 3)).toBe('...');
+    expect(subStr('hi', 0, 10)).toBe('hi');
+  });
+
+  it('closes dangling html tags', () => {
+    expect(fixHtml('<p>hello <strong>world')).toBe('<p>hello <strong>world</strong></p>');
+    expect(fixHtml('<p>abc<')).toBe('<p>abc</p>');
+  });
+});
