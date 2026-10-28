@@ -1,59 +1,51 @@
-Contributing to Typecho
+Contributing
 =======================
 
-Thanks for considering contributing to Typecho! There are many ways to contribute to Typecho, and we appreciate all of them.
+本仓库是 Typecho 的 Hono + Cloudflare Workers 移植版。上游 PHP 实现已从工作树移除，
+但仍保留在 git 历史中，可作为行为基准。
 
-## Reporting Bugs
+## 报告问题
 
-If you find a bug in the source code, you can help us by [submitting an issue](https://github.com/typecho/typecho/issues) 
-to our [GitHub Repository](https://github.com/typecho/typecho). Even better, you can submit a Pull Request with a fix.
+请在本仓库提交 issue，并附上：
 
-## Contributing Code
+- 复现步骤与期望输出
+- `npm run typecheck` / `npm test` 的结果
+- 若与 PHP 版行为不一致，附上 PHP 版本的输出片段
 
-If you would like to contribute code to Typecho, please read the following guidelines:
+## 提交代码
 
-* [Code of Conduct](CODE_OF_CONDUCT.md)
-* [Contributing Guide](CONTRIBUTING.md)
-* [Coding Style Guide](CODING_STYLE.md)
+- 一次提交只做一件事，提交信息说明"为什么"而不只是"改了什么"。
+- 改动涉及主题渲染或路由时，请同时补测试（`tests/`）。
+- 不要引入 `eval` / `new Function` / 动态 `WebAssembly.compile`：Workers 运行时会直接拒绝。
+- 新增 PHP 语法支持时，请在 `php-compat/` 内实现并在 `tests/php-interpreter.spec.ts` 补用例。
 
-## Running Tests
-
-Typecho does not use Composer. The test suite runs on a pinned PHPUnit 9.6 phar, which
-`tools/phpunit.sh` downloads to `tools/bin/` (checking its sha256) the first time it runs.
-You need PHP 7.4 or newer with the `pdo_sqlite`, `sqlite3` and `curl` extensions.
+## 本地检查
 
 ```bash
-# Lint every PHP file, as CI does
-find . -type f -name '*.php' -print0 | xargs -0 -n1 -P4 php -l -n | (! grep -v "No syntax errors detected" )
-
-# Run the unit, security and database suites
-tools/phpunit.sh --testsuite unit,security,db
-
-# Or both at once
-cd tools && make test
+npm install
+npm run gen        # 生成 src/generated/themes.ts
+npm run typecheck
+npm test
+npx wrangler deploy --dry-run --outdir=.wrangler/dist
 ```
 
-Tests live under `tests/Unit`, `tests/Security` and `tests/Db`, and must keep PHP 7.4 syntax.
-Deprecation notices make a test fail, so please fix them instead of silencing them. Tests that need
-network access belong in `@group network`; they are skipped by default and can be run with
-`tools/phpunit.sh --group network`.
+CI 会执行同样的四步（见 `.github/workflows/ci.yml`）。
 
-## Translations
+## 本地调试站点
 
-Please see [TRANSLATION](https://github.com/typecho/languages) for details.
+```bash
+npm run db:migrate:local
+npm run db:seed:local
+npm run dev
+```
 
-## Plugin Development
+`scripts/seed-local.sql` 只用于本地演示，会先清空相关表。
 
-Please see [Plugin Development](http://docs.typecho.org/plugins) for details.
+## 主题开发
 
-## Theme Development
+目录：`themes/<name>/*.php`；静态资源：`public/usr/themes/<name>/`。
+模板可用的 `$this` API 见 README 的「主题与插件」一节。
 
-Please see [Theme Development](http://docs.typecho.org/themes) for details.
+## 许可
 
-## Community
-
-* [Telegram Channel](https://t.me/typechodev)
-* [Homepage](http://typecho.org/)
-* [Documents](http://docs.typecho.org/)
-* [Community](http://forum.typecho.org/)
-* [Download](http://typecho.org/download)
+贡献的代码以 GPL-2.0 授权，与上游 Typecho 一致。
