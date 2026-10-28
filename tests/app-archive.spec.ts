@@ -5,13 +5,14 @@ import type { Archive } from '../src/widgets/archive';
 import type { Env } from '../src/env';
 import { DEFAULT_ROUTING_TABLE } from './helpers/render-theme';
 
-function createEnv(theme = 'default', content?: Record<string, unknown>, routes = DEFAULT_ROUTING_TABLE): Env {
+function createEnv(theme = 'default', content?: Record<string, unknown>, routes = DEFAULT_ROUTING_TABLE, frontPage = 'recent'): Env {
   const values = [
     { name: 'installed', value: '1' },
     { name: 'theme', value: theme },
     { name: 'title', value: 'Empty Blog' },
     { name: 'siteUrl', value: 'https://example.test' },
     { name: 'rewrite', value: '1' },
+    { name: 'frontPage', value: frontPage },
     { name: 'routingTable', value: JSON.stringify(routes) },
   ];
   const d1 = {
@@ -54,6 +55,12 @@ describe('empty public archive', () => {
     const response = await renderSite(createEnv(), new Request('https://example.test/'));
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('没有找到内容');
+  });
+
+  it('serves a safe configured theme file as the homepage without treating an empty list as 404', async () => {
+    const response = await renderSite(createEnv('default', undefined, DEFAULT_ROUTING_TABLE, 'file:404.php'), new Request('https://example.test/'));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('404 - 页面没找到');
   });
 
   it('renders the themed 404 without revealing internal errors', async () => {
