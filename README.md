@@ -40,7 +40,7 @@ Cloudflare 会根据 `wrangler.toml` 创建并绑定 Worker 所需的 D1、R2 �
 
 ## 手动部署
 
-需要 Node.js 20 或更新版本、一个 Cloudflare 账号，以及 Wrangler 登录权限。
+部署需要 Node.js 20 或更新版本、一个 Cloudflare 账号，以及 Wrangler 登录权限。若要运行 `npm test`，请使用 Node.js 24（测试使用内置的 `node:sqlite`）。
 
 1. 获取代码并安装依赖：
 

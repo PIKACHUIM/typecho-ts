@@ -4,7 +4,7 @@
 
 ## 准备环境
 
-安装 Node.js 20 或更新版本，然后克隆仓库：
+安装 Node.js 20 或更新版本；如果还要运行 `npm test`，请使用 Node.js 24（测试使用内置的 `node:sqlite`）。然后克隆仓库：
 
 ```bash
 git clone https://github.com/PIKACHUIM/typecho-ts.git
