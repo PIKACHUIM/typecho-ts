@@ -5,6 +5,7 @@ on:
     branches: [master, main]
     paths:
       - 'docs/**'
+      - 'README.md'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/docs.yml'
@@ -28,24 +29,24 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/configure-pages@v5
+        id: pages
       - run: npm ci
-      - name: Resolve Pages base path
+      - name: Normalize Pages base path
         id: base
         shell: bash
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: |
-          repo="${{ github.event.repository.name }}"
-          if [[ "$repo" == *.github.io ]]; then
+          if [[ -z "$PAGES_BASE_PATH" || "$PAGES_BASE_PATH" == "/" ]]; then
             echo "path=/" >> "$GITHUB_OUTPUT"
           else
-            echo "path=/$repo/" >> "$GITHUB_OUTPUT"
+            echo "path=${PAGES_BASE_PATH%/}/" >> "$GITHUB_OUTPUT"
           fi
       - name: Build documentation
         env:
           DOCS_BASE: ${{ steps.base.outputs.path }}
         run: npm run docs:build
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/.vitepress/dist
