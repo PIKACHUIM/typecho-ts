@@ -77,7 +77,7 @@ export const DEFAULT_ROUTING_TABLE = {
   category_page: { url: '/category/[slug]/[page:digital]/', widget: '\\Widget\\Archive', action: 'render' },
   tag_page: { url: '/tag/[slug]/[page:digital]/', widget: '\\Widget\\Archive', action: 'render' },
   search_page: { url: '/search/[keywords]/[page:digital]/', widget: '\\Widget\\Archive', action: 'render' },
-  feed: { url: '/feed/[feed:alpha]', widget: '\\Widget\\Feed', action: 'render' },
+  feed: { url: '/feed[feed:string:0]', widget: '\\Widget\\Feed', action: 'render' },
   page: { url: '/[slug].html', widget: '\\Widget\\Archive', action: 'render' },
   comment_page: { url: '/archives/[cid:digital]/comment-page-[commentPage:digital]/', widget: '\\Widget\\Archive', action: 'render' },
 };

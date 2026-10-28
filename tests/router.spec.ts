@@ -24,6 +24,11 @@ describe('Router (Typecho routing table port)', () => {
     expect(match?.params).toEqual({ slug: 'default', page: '2' });
   });
 
+  it('matches Typecho feed root and nested comment feed paths', () => {
+    expect(router.match('/feed/')?.params).toEqual({ feed: '/' });
+    expect(router.match('/feed/rss/comments/')?.params).toEqual({ feed: '/rss/comments/' });
+  });
+
   it('builds urls from the format string', () => {
     expect(router.url('post', { cid: '42' }, 'http://example.com')).toBe('http://example.com/archives/42/');
     expect(router.url('index', null, 'http://example.com')).toBe('http://example.com/');
