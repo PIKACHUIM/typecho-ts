@@ -57,6 +57,7 @@ function options(values: Record<string, unknown> = {}): SiteOptions {
       rewrite: '1',
       routingTable: {
         post: { url: '/archives/[cid:digital]/', widget: '\\Widget\\Archive' },
+        attachment: { url: '/attachment/[cid:digital]/', widget: '\\Widget\\Archive' },
         page: { url: '/[slug:alpha].html', widget: '\\Widget\\Archive' },
         comment_page: { url: '[permalink:string]/comment-page-[commentPage:digital]', widget: '\\Widget\\CommentPage' },
         feedback: { url: '[permalink:string]/[type:alpha]', widget: '\\Widget\\Feedback' },
@@ -95,6 +96,14 @@ describe('comment action', () => {
     const response = await handleCommentRequest(db, submit({ text: 'Reply on page two' }, referer), options());
     expect(response?.status).toBe(303);
     expect(response?.headers.get('location')).toBe(`${postUrl}#comment-7`);
+  });
+
+  it('accepts an explicitly comment-enabled public attachment and its pagination referer', async () => {
+    const { db } = fakeDb(sampleRow({ type: 'attachment', allowComment: '1' }));
+    const referer = `${base}/attachment/12/comment-page-2`;
+    const response = await handleCommentRequest(db, submit({ text: 'Attachment reply' }, referer), options());
+    expect(response?.status).toBe(303);
+    expect(response?.headers.get('location')).toBe(`${base}/attachment/12/#comment-7`);
   });
 
   it('places moderated comments in waiting without changing the approved count', async () => {

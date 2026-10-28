@@ -46,7 +46,7 @@ export async function handleCommentRequest(db: Db, request: RequestContext, opti
       ? options.router.url('post', { cid: commentPage.params.cid }, '') : '')
     : refererPath;
   const match = options.router.match(parentPath.startsWith('/') ? parentPath : `/${parentPath}`);
-  if (!match || (match.route.name !== 'post' && match.route.name !== 'page')) return text('Invalid comment target', 400);
+  if (!match || !['post', 'page', 'attachment'].includes(match.route.name)) return text('Invalid comment target', 400);
   if (routedComment) {
     const routeTarget = feedbackRoute.params?.permalink;
     if (!routeTarget || routeTarget.replace(/\/+$/, '') !== parentPath.replace(/\/+$/, '')) {

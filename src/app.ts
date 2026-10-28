@@ -85,7 +85,7 @@ export async function renderSite(env: Env, rawRequest: Request): Promise<Respons
     const permalink = match.params?.permalink ?? (match.params?.cid
       ? options.router.url('post', { cid: match.params.cid }, '') : '');
     const parent = options.router.match(permalink.startsWith('/') ? permalink : `/${permalink}`);
-    if (!parent || !['post', 'page'].includes(parent.route.name)) {
+    if (!parent || !['post', 'page', 'attachment'].includes(parent.route.name)) {
       return renderNotFound(env, db, request, echo, out, options);
     }
     return renderArchive({ env, db, request, echo }, options, out, parent.route.name, parent.params);

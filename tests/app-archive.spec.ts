@@ -5,14 +5,14 @@ import type { Archive } from '../src/widgets/archive';
 import type { Env } from '../src/env';
 import { DEFAULT_ROUTING_TABLE } from './helpers/render-theme';
 
-function createEnv(theme = 'default', content?: Record<string, unknown>): Env {
+function createEnv(theme = 'default', content?: Record<string, unknown>, routes = DEFAULT_ROUTING_TABLE): Env {
   const values = [
     { name: 'installed', value: '1' },
     { name: 'theme', value: theme },
     { name: 'title', value: 'Empty Blog' },
     { name: 'siteUrl', value: 'https://example.test' },
     { name: 'rewrite', value: '1' },
-    { name: 'routingTable', value: JSON.stringify(DEFAULT_ROUTING_TABLE) },
+    { name: 'routingTable', value: JSON.stringify(routes) },
   ];
   const d1 = {
     prepare(sql: string) {
@@ -73,6 +73,21 @@ describe('empty public archive', () => {
     const response = await renderSite(createEnv('default', content), new Request('https://example.test/archives/42/comment-page-2/'));
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('Commented Article');
+  });
+
+  it('resolves a published attachment comment-page URL to the attachment', async () => {
+    const content = {
+      cid: 42, title: 'Image Attachment', slug: 'image', created: 1700000000,
+      modified: 1700000000, type: 'attachment', status: 'publish', text: '',
+      password: null, commentsNum: 0, allowComment: '0', allowFeed: '1', authorId: 1,
+    };
+    const routes = {
+      ...DEFAULT_ROUTING_TABLE,
+      comment_page: { url: '[permalink:string]/comment-page-[commentPage:digital]', widget: '\\Widget\\CommentPage', action: 'action' },
+    };
+    const response = await renderSite(createEnv('default', content, routes), new Request('https://example.test/attachment/42/comment-page-2/'));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('Image Attachment');
   });
 
   it('uses the classic-22 search template rather than its generic archive page', async () => {
