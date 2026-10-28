@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { createApp } from '../src/app';
+import type { Env } from '../src/env';
 import { handleUploadRequest } from '../src/core/uploads';
 import { cookiePrefix, securityToken, typechoHash } from '../src/core/auth';
 import { Db } from '../src/core/db';
@@ -225,5 +227,31 @@ describe('D1 + R2 attachment actions', () => {
     const response = await handle(services, makeRequest(`/action/contents-attachment-edit?_=${token}`, 'POST', new URLSearchParams({ do: 'delete', cid: '3' })));
     expect(response?.status).toBe(409);
     expect(services.rows.has(3)).toBe(true);
+  });
+});
+
+describe('public attachment cache behavior', () => {
+  it('does not cache either a stored object or a deleted object response', async () => {
+    let present = true;
+    const bucket = {
+      async get() {
+        return present ? {
+          body: new Response('image').body,
+          httpMetadata: { contentType: 'image/png' },
+          httpEtag: '"image-etag"',
+        } : null;
+      },
+    } as unknown as R2Bucket;
+    const app = createApp();
+    const env = { BUCKET: bucket } as Env;
+    const url = `${base}/usr/uploads/2026/10/test.png`;
+    const stored = await app.request(url, {}, env);
+    expect(stored.status).toBe(200);
+    expect(stored.headers.get('cache-control')).toBe('no-store');
+    expect(stored.headers.get('x-content-type-options')).toBe('nosniff');
+    present = false;
+    const removed = await app.request(url, {}, env);
+    expect(removed.status).toBe(404);
+    expect(removed.headers.get('cache-control')).toBe('no-store');
   });
 });

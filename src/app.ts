@@ -290,12 +290,13 @@ export function createApp(): Hono<{ Bindings: Env }> {
   app.get('/usr/uploads/*', async (c) => {
     const key = new URL(c.req.url).pathname.replace(/^\/usr\/uploads\//, 'uploads/');
     const object = await c.env.BUCKET.get(key);
-    if (!object) return c.notFound();
+    if (!object) return new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
     return new Response(object.body, {
       headers: {
         'content-type': object.httpMetadata?.contentType ?? 'application/octet-stream',
         etag: object.httpEtag,
-        'cache-control': 'public, max-age=31536000, immutable',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
       },
     });
   });
