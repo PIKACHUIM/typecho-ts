@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { renderSite } from '../src/app';
+import { chooseThemeFile, renderSite } from '../src/app';
+import type { BundledThemeStore } from '../src/core/theme';
+import type { Archive } from '../src/widgets/archive';
 import type { Env } from '../src/env';
 import { DEFAULT_ROUTING_TABLE } from './helpers/render-theme';
 
@@ -30,6 +32,22 @@ function createEnv(theme = 'default', content?: Record<string, unknown>): Env {
   } as unknown as D1Database;
   return { DB: d1 } as Env;
 }
+
+describe('Typecho archive template fallback', () => {
+  it.each([
+    ['page', 'page-slug', true, '', ['single.php', 'index.php'], 'single.php'],
+    ['page', 'page-slug', true, '', ['index.php'], 'index.php'],
+    ['attachment', 'file', true, '', ['post.php', 'single.php', 'index.php'], 'post.php'],
+    ['attachment', 'file', true, '', ['page.php', 'post.php', 'index.php'], 'page.php'],
+    ['category', 'news', false, '', ['category/news.php', 'category.php', 'archive.php'], 'category/news.php'],
+    ['author', '7', false, '', ['author/7.php', 'author.php', 'archive.php'], 'author/7.php'],
+    ['post', 'slug', true, 'special.php', ['special.php', 'post.php', 'index.php'], 'special.php'],
+  ])('%s selects %s before later fallbacks', async (kind, slug, single, custom, files, expected) => {
+    const store = { exists: async (_theme: string, path: string) => (files as string[]).includes(path) } as unknown as BundledThemeStore;
+    const archive = { archiveType: kind, archiveSlug: slug, archiveSingle: single, themeFile: custom } as unknown as Archive;
+    expect(await chooseThemeFile(store, 'sample', archive, false)).toBe(expected);
+  });
+});
 
 describe('empty public archive', () => {
   it('shows the theme empty state instead of a 404 response', async () => {

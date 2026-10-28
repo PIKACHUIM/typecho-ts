@@ -168,20 +168,18 @@ async function renderArchive(
   });
 }
 
-async function chooseThemeFile(store: BundledThemeStore, theme: string, archive: Archive, notFound: boolean): Promise<string | null> {
+export async function chooseThemeFile(store: BundledThemeStore, theme: string, archive: Archive, notFound: boolean): Promise<string | null> {
   const kind = archive.archiveType;
   const slug = archive.archiveSlug;
   const specific = /^[A-Za-z0-9_-]{1,150}$/.test(slug) ? `${kind}/${slug}.php` : '';
-  let candidates: string[];
-  if (notFound) candidates = ['404.php', 'index.php'];
-  else if (kind === 'index' || kind === 'front') candidates = ['index.php'];
-  else if (kind === 'page') candidates = ['page.php', 'single.php', 'index.php'];
-  else if (kind === 'post') candidates = ['post.php', 'single.php', 'index.php'];
-  else if (kind === 'attachment') candidates = ['attachment.php', 'page.php', 'single.php', 'index.php'];
-  else if (kind === 'category' || kind === 'tag') candidates = [specific, `${kind}.php`, 'archive.php', 'index.php'];
-  else if (kind === 'search' || kind === 'author' || kind === 'date') candidates = [`${kind}.php`, 'archive.php', 'index.php'];
-  else candidates = ['archive.php', 'index.php'];
-  if (archive.themeFile && !notFound) candidates.unshift(archive.themeFile);
+  const candidates = notFound ? ['404.php', 'index.php'] : [
+    archive.themeFile,
+    specific,
+    `${kind}.php`,
+    ...(kind === 'attachment' ? ['page.php', 'post.php'] : []),
+    ...(kind === 'index' || kind === 'front' ? [] : [archive.archiveSingle ? 'single.php' : 'archive.php']),
+    'index.php',
+  ];
   for (const candidate of candidates) {
     if (candidate && await store.exists(theme, candidate)) return candidate;
   }
