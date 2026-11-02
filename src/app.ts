@@ -7,6 +7,7 @@ import type { Env } from './env';
 import { Db } from './core/db';
 import { buildRequestContext, type RequestContext } from './core/request';
 import { loadOptions, type SiteOptions } from './core/options';
+import { createSchema, isMissingTableError } from './core/schema';
 import { BundledThemeStore, makeIncludeResolver, normalize } from './core/theme';
 import { listCategories, listContents, listPages, listRecentComments } from './repo/content';
 import { handleAuthRequest, isInstallationComplete, renderInstaller } from './core/install-auth';
@@ -32,6 +33,26 @@ export interface RenderDeps {
 }
 
 /**
+ * Loads site options, creating the schema first when the D1 database is empty
+ * or was reset. Without this a fresh database answers 500 (`no such table`)
+ * instead of reaching the installer.
+ */
+async function loadSiteOptions(
+  db: Db,
+  request: RequestContext,
+  echo: (value: unknown) => void,
+  siteUrl?: string
+): Promise<SiteOptions> {
+  try {
+    return await loadOptions(db, request, echo, siteUrl);
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+    await createSchema(db);
+    return loadOptions(db, request, echo, siteUrl);
+  }
+}
+
+/**
  * Renders a site request through the theme templates.
  */
 export async function renderSite(env: Env, rawRequest: Request): Promise<Response> {
@@ -39,7 +60,7 @@ export async function renderSite(env: Env, rawRequest: Request): Promise<Respons
   const db = new Db(env.DB, env.DB_PREFIX ?? 'typecho_');
   const out: string[] = [];
   const echo = (value: unknown) => out.push(toStr(value));
-  const options = await loadOptions(db, request, echo, env.SITE_URL);
+  const options = await loadSiteOptions(db, request, echo, env.SITE_URL);
 
   if (!(await isInstallationComplete(db))) return renderInstaller(db, request);
 

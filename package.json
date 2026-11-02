@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Typecho ported to Hono on Cloudflare Workers (D1 + R2)",
   "scripts": {
-    "gen": "node scripts/gen-themes.mjs",
+    "gen": "node scripts/gen-themes.mjs && node scripts/gen-schema.mjs",
     "predev": "npm run gen",
     "dev": "wrangler dev",
     "predeploy": "npm run gen",
