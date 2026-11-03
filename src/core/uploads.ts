@@ -1,4 +1,6 @@
 import { escapeHtml } from './common';
+import { renderAdminShell } from './admin-ui';
+import { attachmentPublicUrl } from './attachment-url';
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
 import type { Db } from './db';
 import type { RequestContext } from './request';
@@ -46,7 +48,8 @@ export async function handleUploadRequest(
       "SELECT cid, title, text, authorId, parent, created FROM table.contents WHERE type = 'attachment' ORDER BY created DESC, cid DESC LIMIT 51 OFFSET ?",
       [(page - 1) * 50]
     );
-    return htmlResponse(mediaPage(request, user, secret, rows, page));
+    const prefix = await db.first<{ value: string | null }>("SELECT value FROM table.options WHERE name = 'attachmentUrlPrefix' AND user = 0");
+    return htmlResponse(mediaPage(request, user, secret, rows, page, prefix?.value ?? ''));
   }
 
   if (request.method !== 'POST') return textResponse('Method Not Allowed', 405);
@@ -71,7 +74,8 @@ export async function handleUploadRequest(
 
   if (path === '/action/upload') {
     if (request.query.has('do')) return textResponse('Unsupported upload action', 400);
-    return upload(db, request, form, user, bucket);
+    const prefix = await db.first<{ value: string | null }>("SELECT value FROM table.options WHERE name = 'attachmentUrlPrefix' AND user = 0");
+    return upload(db, request, form, user, bucket, prefix?.value ?? '');
   }
   if (form.get('do') !== 'delete') return textResponse('Unsupported attachment action', 400);
   return deleteAttachment(db, request, form, bucket);
@@ -129,7 +133,7 @@ function validCsrf(request: RequestContext, form: FormData, user: AuthUser, secr
   return difference === 0;
 }
 
-async function upload(db: Db, request: RequestContext, form: FormData, user: AuthUser, bucket: R2Bucket): Promise<Response> {
+async function upload(db: Db, request: RequestContext, form: FormData, user: AuthUser, bucket: R2Bucket, attachmentUrlPrefix: string): Promise<Response> {
   const file = form.get('file');
   if (!(file instanceof File) || !file.name) return textResponse('No file selected', 400);
   if (file.size < 1 || file.size > MAX_FILE_BYTES) return textResponse('File must be between 1 byte and 5 MB.', 413);
@@ -183,7 +187,7 @@ async function upload(db: Db, request: RequestContext, form: FormData, user: Aut
     }
     return textResponse('Could not save attachment metadata.', 500);
   }
-  const url = `${request.rootUrl}${path}`;
+  const url = attachmentPublicUrl(request.rootUrl, path, attachmentUrlPrefix);
   return jsonResponse([url, {
     cid, title: name, type: extension, size: bytes.length,
     bytes: `${Math.ceil(bytes.length / 1024).toLocaleString('en-US')} Kb`,
@@ -244,19 +248,21 @@ function parseAttachment(raw: string): AttachmentData | null {
   }
 }
 
-function mediaPage(request: RequestContext, user: AuthUser, secret: string, rows: AttachmentRow[], page: number): string {
+function mediaPage(request: RequestContext, user: AuthUser, secret: string, rows: AttachmentRow[], page: number, attachmentUrlPrefix: string): string {
   const referer = `${request.url.origin}${request.url.pathname}${request.url.search}`;
   const token = securityToken(secret, referer, user);
   const uploadAction = `${request.rootUrl}/action/upload?_=${token}`;
   const deleteAction = `${request.rootUrl}/action/contents-attachment-edit?_=${token}`;
   const entries = rows.slice(0, 50).map((row) => {
     const attachment = parseAttachment(row.text);
-    const url = attachment ? `${request.rootUrl}${attachment.path}` : '';
+    const url = attachment ? attachmentPublicUrl(request.rootUrl, attachment.path, attachmentUrlPrefix) : '';
     return `<tr><td>${url ? `<a href="${escapeHtml(url)}">${escapeHtml(row.title)}</a>` : escapeHtml(row.title)}</td><td>${attachment ? escapeHtml(`${Math.ceil(attachment.size / 1024)} Kb`) : '未知'}</td><td><form method="post" action="${escapeHtml(deleteAction)}"><input type="hidden" name="do" value="delete"><input type="hidden" name="cid" value="${row.cid}"><button type="submit"${attachment ? '' : ' disabled'}>删除</button></form></td></tr>`;
   }).join('');
   const previous = page > 1 ? `<a href="${escapeHtml(request.rootUrl)}/admin/manage-medias.php?page=${page - 1}">上一页</a>` : '';
   const next = rows.length > 50 ? `<a href="${escapeHtml(request.rootUrl)}/admin/manage-medias.php?page=${page + 1}">下一页</a>` : '';
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>附件管理 · Typecho</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 18px;color:#26333d}nav a{margin-right:18px;color:#257059}table{width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}button{padding:7px 16px}form{margin:0}input[type=file]{max-width:100%}</style></head><body><nav><a href="${escapeHtml(request.rootUrl)}/admin/">后台</a><a href="${escapeHtml(request.rootUrl)}/admin/manage-posts.php">文章</a></nav><h1>附件管理</h1>${request.query.has('deleted') ? '<p role="status">已删除。</p>' : ''}<form method="post" enctype="multipart/form-data" action="${escapeHtml(uploadAction)}"><label>选择图片（JPG、PNG、GIF、WebP；最大 5 MB）<input type="file" name="file" accept=".jpg,.jpeg,.png,.gif,.webp" required></label><button type="submit">上传</button></form><p id="upload-message" role="alert"></p><table><thead><tr><th>文件</th><th>大小</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="3">暂无附件</td></tr>'}</tbody></table><nav>${previous} ${next}</nav><script>document.querySelector('form[enctype]').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget;const message=document.getElementById('upload-message');message.textContent='上传中…';try{const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin'});if(!response.ok)throw new Error(await response.text());location.assign(location.pathname+location.search);}catch(error){message.textContent=String(error);}});</script></body></html>`;
+  const storageUrl = escapeHtml(`${request.rootUrl}/admin/options-media.php`);
+  const body = `<h1>附件管理</h1><p class="description">附件存储由 Cloudflare R2 绑定提供；<a href="${storageUrl}">配置 R2 附件 URL</a>。</p>${request.query.has('deleted') ? '<p role="status">已删除。</p>' : ''}<form method="post" enctype="multipart/form-data" action="${escapeHtml(uploadAction)}"><label>选择图片（JPG、PNG、GIF、WebP；最大 5 MB）<input type="file" name="file" accept=".jpg,.jpeg,.png,.gif,.webp" required></label><button type="submit">上传</button></form><p id="upload-message" role="alert" data-uploading-label="上传中…"></p><table><thead><tr><th>文件</th><th>大小</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="3">暂无附件</td></tr>'}</tbody></table><nav>${previous} ${next}</nav><script>document.querySelector('form[enctype]').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget;const message=document.getElementById('upload-message');message.textContent=message.dataset.uploadingLabel||'上传中…';try{const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin'});if(!response.ok)throw new Error(await response.text());location.assign(location.pathname+location.search);}catch(error){message.textContent=String(error);}});</script>`;
+  return renderAdminShell('附件管理', request, body);
 }
 
 function textResponse(message: string, status: number): Response {

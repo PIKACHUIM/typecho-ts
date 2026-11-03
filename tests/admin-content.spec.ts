@@ -113,7 +113,7 @@ describe('content administration', () => {
     expect(get?.status).toBe(200);
     const html = await get?.text();
     expect(html).toContain('name="category[]" value="2" checked');
-    expect(html).toContain('生活（默认分类）');
+    expect(html).toContain('生活<span class="taxonomy-default">（默认分类）</span>');
     expect(html).toContain('name="tags[]" value="7"');
     expect(html).toContain('&lt;测试&gt;');
     expect(html).not.toContain('<测试>');

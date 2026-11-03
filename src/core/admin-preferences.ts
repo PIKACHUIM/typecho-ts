@@ -1,4 +1,5 @@
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
+import { renderAdminShell } from './admin-ui';
 import { escapeHtml } from './common';
 import type { Db } from './db';
 import { currentRequestUrl, type RequestContext } from './request';
@@ -108,8 +109,7 @@ function notice(request: RequestContext): string {
   return request.query.has('saved') ? '<p role="status">设置已保存。</p>' : '';
 }
 function shell(title: string, request: RequestContext, body: string): string {
-  const root = escapeHtml(request.rootUrl);
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Typecho</title><style>body{margin:0;background:#f6f8f9;color:#26333d;font:16px/1.6 system-ui,sans-serif}header{background:#fff;border-bottom:1px solid #e0e7e8;padding:16px max(24px,calc((100vw - 760px)/2))}a{color:#257059;margin-right:16px}main{max-width:760px;margin:32px auto;padding:24px;background:#fff;border:1px solid #e2e8e8;border-radius:12px}form{display:grid;gap:15px}label{display:grid;gap:6px}.checkbox{display:flex;align-items:center}.checkbox input{margin-right:10px}input,select{font:inherit;border:1px solid #cbd6d5;border-radius:6px;padding:8px}button{background:#257059;color:#fff;border:0;border-radius:6px;padding:11px;cursor:pointer}@media(max-width:790px){main{margin:16px;padding:18px}}</style></head><body><header><a href="${root}/admin/">后台</a><a href="${root}/admin/options-general.php">基本设置</a><a href="${root}/admin/options-reading.php">阅读设置</a><a href="${root}/admin/options-discussion.php">评论设置</a></header><main>${body}</main></body></html>`;
+  return renderAdminShell(title, request, body);
 }
 function text(message: string, status: number): Response { return new Response(message, { status, headers: { 'content-type': 'text/plain; charset=UTF-8' } }); }
 function redirect(location: string): Response { return new Response(null, { status: 303, headers: { location } }); }

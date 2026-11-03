@@ -21,6 +21,7 @@ function fakeServices() {
   let nextCid = 10;
   const fail = { put: false, putAfterStore: false, bucketDelete: false, insert: false, dbDelete: false };
   let group = 'administrator';
+  let attachmentUrlPrefix = '';
   const d1 = {
     prepare(sql: string) {
       const statement = {
@@ -29,6 +30,7 @@ function fakeServices() {
         async first() {
           statements.push({ sql, params: statement.params });
           if (sql.includes('FROM typecho_users')) return { ...admin, group };
+          if (sql.includes("name = 'attachmentUrlPrefix'")) return { value: attachmentUrlPrefix };
           if (sql.includes("type IN ('post', 'page')")) return Number(statement.params[0]) === 2 ? { cid: 2 } : null;
           if (sql.includes("type = 'attachment'")) return rows.get(Number(statement.params[0])) ?? null;
           if (sql.includes('RETURNING cid')) {
@@ -72,7 +74,11 @@ function fakeServices() {
       objects.delete(key);
     },
   } as unknown as R2Bucket;
-  return { db: new Db(d1), bucket, rows, objects, statements, fail, setGroup: (value: string) => { group = value; } };
+  return {
+    db: new Db(d1), bucket, rows, objects, statements, fail,
+    setGroup: (value: string) => { group = value; },
+    setAttachmentPrefix: (value: string) => { attachmentUrlPrefix = value; },
+  };
 }
 
 function makeRequest(path: string, method = 'GET', body?: FormData | URLSearchParams, auth = cookie, referer = media): Request {
@@ -140,6 +146,22 @@ describe('D1 + R2 attachment actions', () => {
     const attachment = JSON.parse(row.text) as { path: string; name: string; type: string; mime: string; size: number };
     expect(attachment).toEqual({ name: 'hello.png', path: new URL(url).pathname, type: 'png', mime: 'image/png', size: png.length });
     expect(services.objects.get(new URL(url).pathname.slice('/usr/'.length))?.mime).toBe('image/png');
+  });
+
+  it('uses the configured public attachment prefix while retaining the internal R2 key', async () => {
+    const services = fakeServices();
+    services.setAttachmentPrefix('https://cdn.example.test/assets');
+    const token = securityToken(secret, media, admin);
+    const response = await handle(services, makeRequest(`/action/upload?_=${token}`, 'POST', imageForm('green.png')));
+    expect(response?.status).toBe(200);
+    const [url, info] = await response!.json() as [string, { cid: number }];
+    expect(url).toMatch(/^https:\/\/cdn\.example\.test\/assets\/uploads\/\d{4}\/\d{2}\/[0-9a-f-]{36}\.png$/);
+    const attachment = JSON.parse(services.rows.get(info.cid)!.text) as { path: string };
+    expect(attachment.path).toMatch(/^\/usr\/uploads\//);
+    const objectKey = attachment.path.slice('/usr/'.length);
+    expect(services.objects.has(objectKey)).toBe(true);
+    const listing = await handle(services, makeRequest('/admin/manage-medias.php'));
+    expect(await listing?.text()).toContain(url);
   });
 
   it('rejects executable, forged, empty, oversized, invalid-name and nonexistent-parent uploads', async () => {

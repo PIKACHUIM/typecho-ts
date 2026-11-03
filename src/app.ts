@@ -6,6 +6,7 @@ import { toStr } from '../php-compat/values';
 import type { Env } from './env';
 import { Db } from './core/db';
 import { buildRequestContext, type RequestContext } from './core/request';
+import { localizeAdminHtml, localizeAdminText } from './core/admin-i18n';
 import { loadOptions, type SiteOptions } from './core/options';
 import { createSchema, isMissingTableError } from './core/schema';
 import { BundledThemeStore, makeIncludeResolver, normalize } from './core/theme';
@@ -13,6 +14,8 @@ import { listCategories, listContents, listPages, listRecentComments } from './r
 import { handleAuthRequest, isInstallationComplete, renderInstaller } from './core/install-auth';
 import { handleAdminContentRequest } from './core/admin-content';
 import { handleAdminSettingsRequest } from './core/admin-settings';
+import { handleAdminThemesRequest } from './core/admin-themes';
+import { handleAdminStorageRequest } from './core/admin-storage';
 import { handleFeed } from './core/feed';
 import { handleCommentRequest } from './core/comment-action';
 import { handleUploadRequest } from './core/uploads';
@@ -70,6 +73,10 @@ export async function renderSite(env: Env, rawRequest: Request): Promise<Respons
   if (contentResponse) return contentResponse;
   const settingsResponse = await handleAdminSettingsRequest(db, request, String(options.get('secret') ?? ''));
   if (settingsResponse) return settingsResponse;
+  const themesResponse = await handleAdminThemesRequest(db, request, String(options.get('secret') ?? ''));
+  if (themesResponse) return themesResponse;
+  const storageResponse = await handleAdminStorageRequest(db, request, String(options.get('secret') ?? ''), env.BUCKET);
+  if (storageResponse) return storageResponse;
   const preferencesResponse = await handleAdminPreferencesRequest(db, request, String(options.get('secret') ?? ''));
   if (preferencesResponse) return preferencesResponse;
   const uploadResponse = await handleUploadRequest(db, request, String(options.get('secret') ?? ''), env.BUCKET, rawRequest);
@@ -305,6 +312,48 @@ function renderError(error: unknown): Response {
   return new Response('Internal Server Error', { status: 500, headers: { 'content-type': 'text/plain; charset=UTF-8' } });
 }
 
+export async function applyAdminPreferences(env: Env, request: Request, response: Response): Promise<Response> {
+  const url = new URL(request.url);
+  let refererPath = '';
+  try { refererPath = request.headers.get('referer') ? new URL(request.headers.get('referer')!).pathname : ''; } catch { refererPath = ''; }
+  const isAdminPage = /\/admin(?:\/|$)/.test(url.pathname);
+  const isAdminAction = url.pathname.includes('/action/') && /\/admin(?:\/|$)/.test(refererPath);
+  if (!isAdminPage && !isAdminAction) return response;
+
+  const contentType = response.headers.get('content-type') ?? '';
+  const isHtml = contentType.includes('text/html');
+  const isPlainText = contentType.includes('text/plain');
+  if (!isHtml && !isPlainText) return response;
+
+  const db = new Db(env.DB, env.DB_PREFIX ?? 'typecho_');
+  const rows = await db.all<{ name: string; value: string | null }>(
+    "SELECT name, value FROM table.options WHERE user = 0 AND name IN ('adminTheme','adminMode','adminLocale')"
+  );
+  const preferences = Object.fromEntries(rows.map(({ name, value }) => [name, value ?? '']));
+  const theme = ['official', 'green', 'ocean'].includes(preferences.adminTheme) ? preferences.adminTheme : 'official';
+  const mode = preferences.adminMode === 'dark' ? 'dark' : 'light';
+  const locale = preferences.adminLocale === 'en-US' ? 'en-US' : 'zh-CN';
+  if (isPlainText) {
+    const body = localizeAdminText(await response.text(), locale);
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    headers.delete('etag');
+    return new Response(body, { status: response.status, statusText: response.statusText, headers });
+  }
+  const html = localizeAdminHtml(await response.text(), locale);
+  const themed = html.replace(/<html\b([^>]*)>/i, (_match, attributes: string) => {
+    const clean = attributes
+      .replace(/\slang=(?:\"[^\"]*\"|'[^']*')/i, '')
+      .replace(/\sdata-admin-theme=(?:\"[^\"]*\"|'[^']*')/i, '')
+      .replace(/\sdata-admin-mode=(?:\"[^\"]*\"|'[^']*')/i, '');
+    return `<html${clean} lang=\"${locale}\" data-admin-theme=\"${theme}\" data-admin-mode=\"${mode}\">`;
+  });
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.delete('etag');
+  return new Response(themed, { status: response.status, statusText: response.statusText, headers });
+}
+
 export function createApp(): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
@@ -324,7 +373,8 @@ export function createApp(): Hono<{ Bindings: Env }> {
 
   app.all('*', async (c) => {
     try {
-      return await renderSite(c.env, c.req.raw);
+      const response = await renderSite(c.env, c.req.raw);
+      return await applyAdminPreferences(c.env, c.req.raw, response);
     } catch (error) {
       return renderError(error);
     }

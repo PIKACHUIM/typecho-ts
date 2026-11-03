@@ -1,5 +1,6 @@
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
 import { escapeHtml } from './common';
+import { renderAdminShell } from './admin-ui';
 import type { Db } from './db';
 import { currentRequestUrl, type RequestContext } from './request';
 
@@ -115,7 +116,8 @@ function listPage(request: RequestContext, user: AuthUser, secret: string, statu
   }).join('');
   const previous = page > 1 ? `<a href="${list}?status=${status}&amp;page=${page - 1}">上一页</a>` : '';
   const next = rows.length > pageSize ? `<a href="${list}?status=${status}&amp;page=${page + 1}">下一页</a>` : '';
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>评论管理 · Typecho</title><style>body{margin:0;background:#f6f8f9;color:#26333d;font:16px/1.6 system-ui,sans-serif}header{background:#fff;border-bottom:1px solid #e0e7e8;padding:16px max(24px,calc((100vw - 900px)/2))}a{color:#257059;margin-right:16px}main{max-width:900px;margin:32px auto;padding:24px;background:#fff;border:1px solid #e2e8e8;border-radius:12px}h1{margin:0 0 16px}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #e8eeee;padding:12px;text-align:left;vertical-align:top}small{display:block;color:#788}.comment{white-space:pre-wrap;overflow-wrap:anywhere;max-width:360px}td form{display:inline-block;margin:2px}button{border:0;background:#257059;color:#fff;border-radius:6px;padding:6px 10px;cursor:pointer}nav{margin-top:20px}@media(max-width:900px){main{margin:16px;padding:16px}table{display:block;overflow-x:auto}}</style></head><body><header><a href="${root}/admin/">后台</a><a href="${root}/admin/manage-posts.php">文章</a><a href="${root}/admin/manage-comments.php">评论</a><a href="${root}/">查看站点</a></header><main><h1>评论管理</h1>${request.query.has('saved') ? '<p role="status">评论已更新。</p>' : ''}<nav>${tabs}</nav><table><thead><tr><th>作者</th><th>文章</th><th>评论</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="4">暂无评论</td></tr>'}</tbody></table><nav>${previous} ${next}</nav></main></body></html>`;
+  const body = `<h1>评论管理</h1>${request.query.has('saved') ? '<p role="status">评论已更新。</p>' : ''}<nav>${tabs}</nav><table><thead><tr><th>作者</th><th>文章</th><th>评论</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="4">暂无评论</td></tr>'}</tbody></table><nav>${previous} ${next}</nav>`;
+  return renderAdminShell('评论管理', request, body);
 }
 
 function text(message: string, status: number): Response {

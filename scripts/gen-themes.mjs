@@ -30,6 +30,15 @@ for (const name of readdirSync(src)) {
   themes[name] = walk(dir);
 }
 
+if (themes.default) {
+  const green = { ...themes.default };
+  green['index.php'] = green['index.php']
+    .replace('Default theme for Typecho', 'Fresh green theme based on Typecho Default Theme')
+    .replace('@name Typecho 默认主题', '@name 清新绿')
+    .replace('@version 1.2', '@version 1.0');
+  themes.green = green;
+}
+
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(
   out,

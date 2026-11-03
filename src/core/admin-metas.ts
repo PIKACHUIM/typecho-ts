@@ -1,4 +1,5 @@
 import { escapeHtml } from './common';
+import { renderAdminShell } from './admin-ui';
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
 import type { Db } from './db';
 import { currentRequestUrl, type RequestContext } from './request';
@@ -256,8 +257,7 @@ function notice(request: RequestContext): string {
   return '';
 }
 function page(title: string, request: RequestContext, body: string): string {
-  const root = escapeHtml(request.rootUrl);
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Typecho</title><style>body{margin:0;background:#f6f8f9;color:#26333d;font:16px/1.6 system-ui,sans-serif}header{background:#fff;border-bottom:1px solid #e0e7e8;padding:16px max(24px,calc((100vw - 860px)/2))}header a{margin-right:18px}a{color:#257059}main{max-width:860px;margin:32px auto;padding:24px;background:#fff;border:1px solid #e2e8e8;border-radius:12px}h1{margin:0 0 22px}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #e8eeee;padding:12px;text-align:left}form{display:grid;gap:12px}td form{display:inline}label{display:grid;gap:7px}input,textarea,select{font:inherit;border:1px solid #cbd6d5;border-radius:6px;padding:9px}button{border:0;background:#257059;color:#fff;border-radius:6px;padding:9px 14px;cursor:pointer}.danger{background:#a64e49}@media(max-width:900px){main{margin:16px;padding:16px}}</style></head><body><header><a href="${root}/admin/">后台</a><a href="${root}/admin/manage-posts.php">文章</a><a href="${root}/admin/manage-categories.php">分类</a><a href="${root}/admin/manage-tags.php">标签</a><a href="${root}/">查看站点</a></header><main>${body}</main></body></html>`;
+  return renderAdminShell(title, request, body);
 }
 function html(body: string): Response { return new Response(body, { headers: { 'content-type': 'text/html; charset=UTF-8' } }); }
 function text(message: string, status: number): Response { return new Response(message, { status, headers: { 'content-type': 'text/plain; charset=UTF-8' } }); }

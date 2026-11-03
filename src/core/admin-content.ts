@@ -1,4 +1,5 @@
 import { escapeHtml } from './common';
+import { renderAdminShell } from './admin-ui';
 import { findCurrentUser, securityToken, type AuthUser } from './auth';
 import type { Db } from './db';
 import type { ContentRow } from '../repo/content';
@@ -216,7 +217,7 @@ function contentEditorPage(request: RequestContext, row: ContentRow | null, type
     const choices = metas.filter((meta) => meta.type === kind).map((meta) => {
       const mid = Number(meta.mid);
       const checked = row ? selected.includes(mid) : kind === 'category' && mid === defaultCategory;
-      return `<label class="check"><input type="checkbox" name="${kind === 'category' ? 'category[]' : 'tags[]'}" value="${mid}"${checked ? ' checked' : ''}>${escapeHtml(meta.name)}${kind === 'category' && mid === defaultCategory ? '（默认分类）' : ''}</label>`;
+      return `<label class="check"><input type="checkbox" name="${kind === 'category' ? 'category[]' : 'tags[]'}" value="${mid}"${checked ? ' checked' : ''}>${escapeHtml(meta.name)}${kind === 'category' && mid === defaultCategory ? '<span class="taxonomy-default">（默认分类）</span>' : ''}</label>`;
     }).join('');
     return `<fieldset><legend>${kind === 'category' ? '分类' : '标签'}</legend>${choices || `<p>暂无${kind === 'category' ? '分类' : '标签'}</p>`}</fieldset>`;
   }).join('') : '';
@@ -225,8 +226,7 @@ function contentEditorPage(request: RequestContext, row: ContentRow | null, type
 }
 
 function adminPage(title: string, request: RequestContext, body: string): string {
-  const root = escapeHtml(request.rootUrl);
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Typecho</title><style>body{margin:0;background:#f6f8f9;color:#26333d;font:16px/1.6 system-ui,sans-serif}header{background:#fff;border-bottom:1px solid #e0e7e8;padding:16px max(24px,calc((100vw - 860px)/2))}header a,nav a{margin-right:18px;color:#257059}main{max-width:860px;margin:32px auto;padding:24px;background:#fff;border:1px solid #e2e8e8;border-radius:12px}h1{margin:0 0 22px}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #e8eeee;padding:12px;text-align:left}td small{display:block;color:#788}form{display:grid;gap:16px}td form{display:block}label{display:grid;gap:7px}input,textarea,select{font:inherit;border:1px solid #cbd6d5;border-radius:6px;padding:9px}textarea{width:100%;resize:vertical;box-sizing:border-box}.check{display:flex;align-items:center}button{border:0;background:#257059;color:#fff;border-radius:6px;padding:9px 18px;cursor:pointer}.danger{background:#a64e49}nav{margin-top:20px}@media(max-width:900px){main{margin:16px;padding:16px}} </style></head><body><header><a href="${root}/admin/">后台</a><a href="${root}/admin/manage-posts.php">文章</a><a href="${root}/admin/manage-pages.php">页面</a><a href="${root}/">查看站点</a></header><main>${body}</main></body></html>`;
+  return renderAdminShell(title, request, body);
 }
 
 function htmlResponse(html: string): Response {

@@ -1,0 +1,58 @@
+@import url("../default/style.css");
+
+:root {
+    --green-primary: #247653;
+    --green-primary-dark: #195e40;
+    --green-soft: #eaf4ed;
+    --green-border: #d8e6dc;
+}
+
+body {
+    background: #f5f8f5;
+    color: #334239;
+}
+
+a {
+    color: var(--green-primary);
+}
+
+a:hover,
+a:focus {
+    color: var(--green-primary-dark);
+}
+
+#header {
+    background: #eef5ef;
+    border-bottom: 1px solid var(--green-border);
+}
+
+#logo {
+    color: #234c36;
+}
+
+#nav-menu a.current,
+#nav-menu a:hover {
+    background: var(--green-soft);
+    color: var(--green-primary-dark);
+}
+
+.post,
+#comments,
+#respond,
+#secondary .widget {
+    border-color: var(--green-border);
+}
+
+button,
+input[type="submit"],
+.submit {
+    background: var(--green-primary);
+    border-color: var(--green-primary);
+    color: #fff;
+}
+
+button:hover,
+input[type="submit"]:hover,
+.submit:hover {
+    background: var(--green-primary-dark);
+}

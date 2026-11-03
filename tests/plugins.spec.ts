@@ -104,7 +104,8 @@ describe('bundled PHP plugin hooks', () => {
     const referer = `${base}/admin/plugins.php`;
     const get = buildRequestContext(new Request(referer, { headers: { cookie } }));
     const page = await handleAuthRequest(store.db, get, 'secret', options());
-    expect(await page?.text()).toContain('HelloWorld：已关闭');
+    const pageHtml = await page?.text();
+    expect(pageHtml).toContain('<code>HelloWorld</code>：<span>已关闭</span>');
     const post = (token: string, plugin = 'HelloWorld', enabled = '1') => {
       const form = new FormData();
       form.set('plugin', plugin); form.set('enabled', enabled);

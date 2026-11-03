@@ -4,6 +4,7 @@
  *
  * @package Typecho Replica Theme
  * @author Typecho Team
+ * @name Typecho 默认主题
  * @version 1.2
  * @link http://typecho.org
  */

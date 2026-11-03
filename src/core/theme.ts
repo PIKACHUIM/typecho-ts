@@ -65,5 +65,5 @@ export function themeMeta(theme: string): { name: string; version: string; autho
   const files = THEME_FILES[theme] ?? {};
   const header = files['index.php'] ?? '';
   const read = (key: string) => header.match(new RegExp(`@${key}\\s+(.+)`))?.[1]?.trim() ?? '';
-  return { name: theme, version: read('version'), author: read('author') };
+  return { name: read('name') || theme, version: read('version'), author: read('author') };
 }
