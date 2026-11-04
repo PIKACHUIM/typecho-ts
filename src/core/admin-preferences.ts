@@ -93,7 +93,7 @@ function boundedInteger(form: FormData, name: string, min: number, max: number):
 async function readingPage(db: Db, request: RequestContext, values: Record<string, string>, action: string): Promise<string> {
   const pages = await db.all<{ cid: number; title: string }>("SELECT cid, title FROM table.contents WHERE type = 'page' AND status = 'publish' ORDER BY cid LIMIT 100");
   const selected = (value: string) => values.frontPage === value ? ' selected' : '';
-  const options = pages.map(({ cid, title }) => `<option value="page:${cid}"${selected(`page:${cid}`)}>${escapeHtml(title || `页面 ${cid}`)}</option>`).join('');
+  const options = pages.map(({ cid, title }) => `<option value="page:${cid}"${selected(`page:${cid}`)} data-i18n-skip>${escapeHtml(title || `页面 ${cid}`)}</option>`).join('');
   return `<h1>阅读设置</h1>${notice(request)}<form method="post" action="${escapeHtml(action)}"><label>首页显示<select name="frontPage"><option value="recent"${selected('recent')}>最新文章</option>${options}</select></label>${numberField('pageSize', '每页文章数', values.pageSize || '10', 1, 100)}${numberField('postsListSize', '近期文章数量', values.postsListSize || '5', 1, 50)}${numberField('commentsListSize', '近期评论数量', values.commentsListSize || '5', 1, 50)}<button type="submit">保存阅读设置</button></form>`;
 }
 

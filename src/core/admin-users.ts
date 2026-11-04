@@ -230,7 +230,7 @@ function usersList(request: RequestContext, actor: AuthUser, secret: string, use
   const action = `${root}/action/users-edit?_=${securityToken(secret, currentRequestUrl(request), actor)}`;
   const entries = users.map((user) => {
     const control = user.uid === actor.uid ? '当前用户' : `<form method="post" action="${action}"><input type="hidden" name="do" value="delete"><input type="hidden" name="uid" value="${user.uid}"><button type="submit">删除</button></form>`;
-    return `<tr><td><a href="${root}/admin/user.php?uid=${user.uid}">${escapeHtml(user.name)}</a></td><td>${escapeHtml(user.screenName || '')}</td><td>${escapeHtml(user.mail || '')}</td><td>${escapeHtml(user.group)}</td><td>${control}</td></tr>`;
+    return `<tr><td><a href="${root}/admin/user.php?uid=${user.uid}"><span data-i18n-skip>${escapeHtml(user.name)}</span></a></td><td><span data-i18n-skip>${escapeHtml(user.screenName || '')}</span></td><td><span data-i18n-skip>${escapeHtml(user.mail || '')}</span></td><td>${escapeHtml(user.group)}</td><td>${control}</td></tr>`;
   }).join('');
   return `<h1>用户管理</h1>${notice(request)}<p><a href="${root}/admin/user.php">新增用户</a></p><table><thead><tr><th>用户名</th><th>显示名称</th><th>邮箱</th><th>用户组</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="5">暂无用户</td></tr>'}</tbody></table>`;
 }
@@ -246,7 +246,7 @@ function userForm(request: RequestContext, actor: AuthUser, secret: string, sele
 function profileForm(request: RequestContext, actor: AuthUser, secret: string): string {
   const root = escapeHtml(request.rootUrl);
   const action = `${root}/action/users-profile?_=${securityToken(secret, currentRequestUrl(request), actor)}`;
-  return `<h1>个人资料</h1>${notice(request)}<p>用户名：${escapeHtml(actor.name)}</p><form method="post" action="${action}"><label>显示名称<input name="screenName" maxlength="32" required value="${escapeHtml(actor.screenName || '')}"></label><label>邮箱<input name="mail" type="email" maxlength="150" required value="${escapeHtml(actor.mail || '')}"></label><label>当前密码（修改密码时必填）<input name="oldPassword" type="password" autocomplete="current-password"></label><label>新密码（留空不修改）<input name="password" type="password" autocomplete="new-password"></label><label>确认新密码<input name="confirm" type="password" autocomplete="new-password"></label><button type="submit">保存资料</button></form>`;
+  return `<h1>个人资料</h1>${notice(request)}<p>用户名：<span data-i18n-skip>${escapeHtml(actor.name)}</span></p><form method="post" action="${action}"><label>显示名称<input name="screenName" maxlength="32" required value="${escapeHtml(actor.screenName || '')}"></label><label>邮箱<input name="mail" type="email" maxlength="150" required value="${escapeHtml(actor.mail || '')}"></label><label>当前密码（修改密码时必填）<input name="oldPassword" type="password" autocomplete="current-password"></label><label>新密码（留空不修改）<input name="password" type="password" autocomplete="new-password"></label><label>确认新密码<input name="confirm" type="password" autocomplete="new-password"></label><button type="submit">保存资料</button></form>`;
 }
 
 function notice(request: RequestContext): string {

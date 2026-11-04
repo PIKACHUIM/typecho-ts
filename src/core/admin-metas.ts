@@ -206,7 +206,7 @@ async function setDefaultCategory(db: Db, request: RequestContext, form: FormDat
 
 function categoryList(request: RequestContext, user: AuthUser, secret: string, rows: MetaRow[], parent: number, defaultMid: number | null): string {
   const children = rows.filter((row) => row.parent === parent);
-  const title = parent ? `${rows.find((row) => row.mid === parent)?.name ?? ''} 的子分类` : '分类管理';
+  const title = parent ? `<span data-i18n-skip>${escapeHtml(rows.find((row) => row.mid === parent)?.name ?? '')}</span> 的子分类` : '分类管理';
   const source = currentRequestUrl(request);
   const action = escapeHtml(`${request.rootUrl}/action/metas-category-edit?_=${securityToken(secret, source, user)}`);
   const entries = children.map((row) => {
@@ -214,10 +214,10 @@ function categoryList(request: RequestContext, user: AuthUser, secret: string, r
     const sub = count ? `<a href="${escapeHtml(request.rootUrl)}/admin/manage-categories.php?parent=${row.mid}">${count} 个子分类</a>` : `<a href="${escapeHtml(request.rootUrl)}/admin/category.php?parent=${row.mid}">新增子分类</a>`;
     const defaultControl = row.mid === defaultMid ? '默认' : `<form method="post" action="${action}"><input type="hidden" name="do" value="default"><input type="hidden" name="mid" value="${row.mid}"><button type="submit">设为默认</button></form>`;
     const deleteControl = row.mid === defaultMid ? '默认分类不可删除' : `<form method="post" action="${action}"><input type="hidden" name="do" value="delete"><input type="hidden" name="mid[]" value="${row.mid}"><button type="submit" class="danger">删除</button></form>`;
-    return `<tr><td><a href="${escapeHtml(request.rootUrl)}/admin/category.php?mid=${row.mid}">${escapeHtml(row.name)}</a></td><td>${escapeHtml(row.slug)}</td><td>${sub}</td><td>${Number(row.count) || 0}</td><td>${defaultControl}</td><td>${deleteControl}</td></tr>`;
+    return `<tr><td><a href="${escapeHtml(request.rootUrl)}/admin/category.php?mid=${row.mid}"><span data-i18n-skip>${escapeHtml(row.name)}</span></a></td><td><span data-i18n-skip>${escapeHtml(row.slug)}</span></td><td>${sub}</td><td>${Number(row.count) || 0}</td><td>${defaultControl}</td><td>${deleteControl}</td></tr>`;
   }).join('');
   const back = parent ? `<a href="${escapeHtml(request.rootUrl)}/admin/manage-categories.php${rows.find((row) => row.mid === parent)?.parent ? `?parent=${rows.find((row) => row.mid === parent)?.parent}` : ''}">返回上级分类</a>` : '';
-  return `<h1>${escapeHtml(title)}</h1>${notice(request)}<p><a href="${escapeHtml(request.rootUrl)}/admin/category.php${parent ? `?parent=${parent}` : ''}">新增分类</a> ${back}</p><table><thead><tr><th>名称</th><th>缩略名</th><th>子分类</th><th>文章数</th><th>默认分类</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="6">没有任何分类</td></tr>'}</tbody></table>`;
+  return `<h1>${title}</h1>${notice(request)}<p><a href="${escapeHtml(request.rootUrl)}/admin/category.php${parent ? `?parent=${parent}` : ''}">新增分类</a> ${back}</p><table><thead><tr><th>名称</th><th>缩略名</th><th>子分类</th><th>文章数</th><th>默认分类</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="6">没有任何分类</td></tr>'}</tbody></table>`;
 }
 
 function categoryEditor(request: RequestContext, user: AuthUser, secret: string, rows: MetaRow[], current: MetaRow | null, parent: number): string {
@@ -230,13 +230,13 @@ function categoryEditor(request: RequestContext, user: AuthUser, secret: string,
     let cursor = row.mid;
     while (cursor && !seen.has(cursor)) { if (cursor === current.mid) return false; seen.add(cursor); cursor = rows.find((item) => item.mid === cursor)?.parent ?? 0; }
     return true;
-  }).map((row) => `<option value="${row.mid}"${row.mid === selectedParent ? ' selected' : ''}>${escapeHtml(row.name)}</option>`).join('');
+  }).map((row) => `<option value="${row.mid}"${row.mid === selectedParent ? ' selected' : ''} data-i18n-skip>${escapeHtml(row.name)}</option>`).join('');
   return `<h1>${current ? '编辑分类' : '新增分类'}</h1><form method="post" action="${action}"><input type="hidden" name="do" value="${current ? 'update' : 'insert'}"><input type="hidden" name="mid" value="${current?.mid ?? ''}"><label>分类名称<input required maxlength="150" name="name" value="${escapeHtml(current?.name ?? '')}"></label><label>分类缩略名<input maxlength="128" name="slug" value="${escapeHtml(current?.slug ?? '')}" placeholder="留空按名称生成"></label><label>父级分类<select name="parent"><option value="0">不选择</option>${options}</select></label><label>分类描述<textarea name="description" maxlength="150" rows="4">${escapeHtml(current?.description ?? '')}</textarea></label><button type="submit">${current ? '编辑分类' : '增加分类'}</button></form><p><a href="${escapeHtml(request.rootUrl)}/admin/manage-categories.php">返回分类管理</a></p>`;
 }
 
 function tagList(request: RequestContext, user: AuthUser, secret: string, rows: MetaRow[], current: MetaRow | null): string {
   const action = escapeHtml(`${request.rootUrl}/action/metas-tag-edit?_=${securityToken(secret, currentRequestUrl(request), user)}`);
-  const entries = rows.map((row) => `<tr><td><a href="${escapeHtml(request.rootUrl)}/admin/manage-tags.php?mid=${row.mid}">${escapeHtml(row.name)}</a></td><td>${escapeHtml(row.slug)}</td><td>${Number(row.count) || 0}</td><td><form method="post" action="${action}"><input type="hidden" name="do" value="delete"><input type="hidden" name="mid[]" value="${row.mid}"><button type="submit" class="danger">删除</button></form></td></tr>`).join('');
+  const entries = rows.map((row) => `<tr><td><a href="${escapeHtml(request.rootUrl)}/admin/manage-tags.php?mid=${row.mid}"><span data-i18n-skip>${escapeHtml(row.name)}</span></a></td><td><span data-i18n-skip>${escapeHtml(row.slug)}</span></td><td>${Number(row.count) || 0}</td><td><form method="post" action="${action}"><input type="hidden" name="do" value="delete"><input type="hidden" name="mid[]" value="${row.mid}"><button type="submit" class="danger">删除</button></form></td></tr>`).join('');
   const editor = `<h2>${current ? '编辑标签' : '新增标签'}</h2><form method="post" action="${action}"><input type="hidden" name="do" value="${current ? 'update' : 'insert'}"><input type="hidden" name="mid" value="${current?.mid ?? ''}"><label>标签名称<input required maxlength="150" name="name" value="${escapeHtml(current?.name ?? '')}"></label><label>标签缩略名<input maxlength="128" name="slug" value="${escapeHtml(current?.slug ?? '')}" placeholder="留空按名称生成"></label><button type="submit">${current ? '编辑标签' : '增加标签'}</button></form>${current ? `<p><a href="${escapeHtml(request.rootUrl)}/admin/manage-tags.php">取消编辑</a></p>` : ''}`;
   return `<h1>标签管理</h1>${notice(request)}<table><thead><tr><th>名称</th><th>缩略名</th><th>文章数</th><th>操作</th></tr></thead><tbody>${entries || '<tr><td colspan="4">没有任何标签</td></tr>'}</tbody></table>${editor}`;
 }

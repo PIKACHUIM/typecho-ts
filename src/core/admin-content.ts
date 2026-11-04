@@ -201,7 +201,7 @@ function contentListPage(request: RequestContext, rows: ContentRow[], type: Cont
   const entries = visible.map((row) => {
     const editor = `${request.rootUrl}/admin/write-${type}.php?cid=${row.cid}`;
     const action = `${request.rootUrl}/action/contents-${type}-delete?_=${securityToken(secret, currentRequestUrl(request), user)}`;
-    return `<tr><td><a href="${escapeHtml(editor)}">${escapeHtml(row.title ?? '(无标题)')}</a><small>${escapeHtml(row.slug ?? '')}</small></td><td>${escapeHtml(row.status)}</td><td><form method="post" action="${escapeHtml(action)}" onsubmit="return confirm('确认删除？')"><input type="hidden" name="cid" value="${row.cid}"><button class="danger" type="submit">删除</button></form></td></tr>`;
+    return `<tr><td><a href="${escapeHtml(editor)}"><span data-i18n-skip>${escapeHtml(row.title ?? '(无标题)')}</span></a><small data-i18n-skip>${escapeHtml(row.slug ?? '')}</small></td><td>${escapeHtml(row.status)}</td><td><form method="post" action="${escapeHtml(action)}" onsubmit="return confirm('确认删除？')"><input type="hidden" name="cid" value="${row.cid}"><button class="danger" type="submit">删除</button></form></td></tr>`;
   }).join('');
   const previous = page > 1 ? `<a href="${escapeHtml(request.rootUrl)}/admin/${listPath}?page=${page - 1}">上一页</a>` : '';
   const next = rows.length > 50 ? `<a href="${escapeHtml(request.rootUrl)}/admin/${listPath}?page=${page + 1}">下一页</a>` : '';
@@ -221,7 +221,236 @@ function contentEditorPage(request: RequestContext, row: ContentRow | null, type
     }).join('');
     return `<fieldset><legend>${kind === 'category' ? '分类' : '标签'}</legend>${choices || `<p>暂无${kind === 'category' ? '分类' : '标签'}</p>`}</fieldset>`;
   }).join('') : '';
-  const body = `<h1>${row ? '编辑' : '新建'}${noun}</h1>${request.query.has('saved') ? '<p role="status">已保存。</p>' : ''}<form method="post" action="${escapeHtml(action)}"><input type="hidden" name="cid" value="${row?.cid ?? 0}"><label>标题<input required maxlength="150" name="title" value="${escapeHtml(row?.title ?? '')}"></label><label>缩略名<input maxlength="150" name="slug" value="${escapeHtml(row?.slug ?? '')}" placeholder="留空自动生成"></label><label>正文<textarea rows="18" name="text">${escapeHtml(row?.text ?? '<!--markdown-->')}</textarea></label>${taxonomyControls}<label>状态<select name="status">${option('publish', '公开')}${option('draft', '草稿')}${option('private', '私密')}</select></label><label class="check"><input type="checkbox" name="allowComment" value="1"${row?.allowComment === '1' || !row ? ' checked' : ''}>允许评论</label><button type="submit">保存${noun}</button></form>`;
+  const editorScript = String.raw`<script>
+(() => {
+  const editor = document.querySelector('.post-editor');
+  if (!(editor instanceof HTMLElement)) return;
+  const source = editor.querySelector('textarea[name="text"]');
+  const preview = editor.querySelector('[data-preview-content]');
+  if (!(source instanceof HTMLTextAreaElement) || !(preview instanceof HTMLElement)) return;
+  const fence = String.fromCharCode(96).repeat(3);
+  const marker = '<!--markdown-->';
+  const markdownButton = editor.querySelector('[data-command="enable-markdown"]');
+  const commandPlaceholder = (name, fallback) => editor.querySelector('[data-command="' + name + '"]')?.dataset.placeholder || fallback;
+
+  const appendInline = (container, text) => {
+    const pattern = /\*\*(.+?)\*\*|__(.+?)__|\*([^*\n]+)\*|_([^_\n]+)_|\[([^\]]+)\]\(([^)\s]+)\)/g;
+    let offset = 0;
+    for (const match of text.matchAll(pattern)) {
+      container.append(document.createTextNode(text.slice(offset, match.index)));
+      if (match[1] !== undefined || match[2] !== undefined) {
+        const strong = document.createElement('strong');
+        strong.textContent = match[1] ?? match[2];
+        container.append(strong);
+      } else if (match[3] !== undefined || match[4] !== undefined) {
+        const emphasis = document.createElement('em');
+        emphasis.textContent = match[3] ?? match[4];
+        container.append(emphasis);
+      } else {
+        const href = match[6];
+        let safeHref = null;
+        try {
+          const url = new URL(href, document.baseURI);
+          if (['http:', 'https:', 'mailto:'].includes(url.protocol)) safeHref = url.href;
+        } catch {
+          safeHref = null;
+        }
+        if (safeHref) {
+          const link = document.createElement('a');
+          link.href = safeHref;
+          link.textContent = match[5];
+          container.append(link);
+        } else {
+          container.append(document.createTextNode(match[5]));
+        }
+      }
+      offset = match.index + match[0].length;
+    }
+    container.append(document.createTextNode(text.slice(offset)));
+  };
+
+  const render = () => {
+    preview.replaceChildren();
+    const markdownMode = source.value.startsWith(marker);
+    preview.dataset.format = markdownMode ? 'markdown' : 'legacy';
+    if (markdownButton instanceof HTMLButtonElement) markdownButton.hidden = markdownMode;
+    editor.querySelectorAll('[data-requires-markdown]').forEach((button) => {
+      if (button instanceof HTMLButtonElement) button.disabled = !markdownMode;
+    });
+    if (!markdownMode) {
+      for (const block of source.value.split(/\r?\n\s*\r?\n/).filter((value) => value.length > 0)) {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = block;
+        preview.append(paragraph);
+      }
+      return;
+    }
+    const markdown = source.value.slice(marker.length).replace(/^\r?\n/, '');
+    const lines = markdown.split(/\r?\n/);
+    let paragraph = [];
+    let list = null;
+    let listType = '';
+    let codeLines = null;
+
+    const flushParagraph = () => {
+      if (paragraph.length === 0) return;
+      const element = document.createElement('p');
+      appendInline(element, paragraph.join(' '));
+      preview.append(element);
+      paragraph = [];
+    };
+    const flushList = () => {
+      list = null;
+      listType = '';
+    };
+    const flushBlocks = () => {
+      flushParagraph();
+      flushList();
+    };
+
+    for (const line of lines) {
+      if (codeLines !== null) {
+        if (line.trim() === fence) {
+          const pre = document.createElement('pre');
+          const code = document.createElement('code');
+          code.textContent = codeLines.join('\n');
+          pre.append(code);
+          preview.append(pre);
+          codeLines = null;
+        } else {
+          codeLines.push(line);
+        }
+        continue;
+      }
+      if (line.startsWith(fence)) {
+        flushBlocks();
+        codeLines = [];
+        continue;
+      }
+      if (!line.trim()) {
+        flushBlocks();
+        continue;
+      }
+      const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+      if (heading) {
+        flushBlocks();
+        const element = document.createElement('h' + heading[1].length);
+        appendInline(element, heading[2]);
+        preview.append(element);
+        continue;
+      }
+      const quote = /^>\s?(.*)$/.exec(line);
+      if (quote) {
+        flushParagraph();
+        flushList();
+        const block = document.createElement('blockquote');
+        const paragraphElement = document.createElement('p');
+        appendInline(paragraphElement, quote[1]);
+        block.append(paragraphElement);
+        preview.append(block);
+        continue;
+      }
+      const item = /^\s*(?:([-*+])|(\d+)[.)])\s+(.*)$/.exec(line);
+      if (item) {
+        flushParagraph();
+        const nextType = item[2] ? 'ol' : 'ul';
+        if (listType !== nextType) flushList();
+        if (!list) {
+          list = document.createElement(nextType);
+          listType = nextType;
+          preview.append(list);
+        }
+        const entry = document.createElement('li');
+        appendInline(entry, item[3]);
+        list.append(entry);
+        continue;
+      }
+      flushList();
+      paragraph.push(line);
+    }
+    flushBlocks();
+    if (codeLines !== null) {
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.textContent = codeLines.join('\n');
+      pre.append(code);
+      preview.append(pre);
+    }
+  };
+
+  const replaceRange = (start, end, replacement, selectionStart, selectionEnd) => {
+    source.setRangeText(replacement, start, end, 'select');
+    source.focus();
+    source.setSelectionRange(selectionStart, selectionEnd);
+    render();
+  };
+  const wrapSelection = (before, after, placeholder) => {
+    const start = source.selectionStart;
+    const end = source.selectionEnd;
+    const selected = source.value.slice(start, end);
+    const inserted = selected || placeholder;
+    replaceRange(start, end, before + inserted + after, start + before.length, start + before.length + inserted.length);
+  };
+  const prefixLines = (prefix, numbered) => {
+    const start = source.selectionStart;
+    const end = source.selectionEnd;
+    const lineStart = source.value.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = source.value.indexOf('\n', end);
+    const stop = lineEnd === -1 ? source.value.length : lineEnd;
+    const lines = source.value.slice(lineStart, stop).split('\n');
+    const inserted = lines.map((line, index) => (numbered ? (index + 1) + '. ' : prefix) + line).join('\n');
+    replaceRange(lineStart, stop, inserted, lineStart, lineStart + inserted.length);
+  };
+
+  editor.querySelectorAll('[data-command]').forEach((button) => {
+    button.addEventListener('click', () => {
+      switch (button.dataset.command) {
+        case 'enable-markdown':
+          source.setRangeText(marker + '\n', 0, 0, 'end');
+          render();
+          source.focus();
+          break;
+        case 'bold': wrapSelection('**', '**', commandPlaceholder('bold', 'Bold')); break;
+        case 'italic': wrapSelection('*', '*', commandPlaceholder('italic', 'Italic')); break;
+        case 'heading': prefixLines('## ', false); break;
+        case 'quote': prefixLines('> ', false); break;
+        case 'unordered-list': prefixLines('- ', false); break;
+        case 'ordered-list': prefixLines('', true); break;
+        case 'link': wrapSelection('[', '](https://example.com)', commandPlaceholder('link', 'Link text')); break;
+        case 'image': wrapSelection('![', '](https://example.com/image.png)', commandPlaceholder('image', 'Image description')); break;
+        case 'code': wrapSelection(fence + '\n', '\n' + fence, commandPlaceholder('code', 'Code')); break;
+        default: break;
+      }
+    });
+  });
+
+  const setView = (view) => {
+    editor.dataset.view = view;
+    editor.querySelectorAll('[data-view-button]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.viewButton === view));
+    });
+    editor.querySelector('.post-editor__source').hidden = view === 'preview';
+    editor.querySelector('.post-editor__preview').hidden = view === 'source';
+  };
+  editor.querySelectorAll('[data-view-button]').forEach((button) => {
+    button.addEventListener('click', () => setView(button.dataset.viewButton));
+  });
+  source.addEventListener('input', render);
+  source.addEventListener('keydown', (event) => {
+    if (!source.value.startsWith(marker)) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b') {
+      event.preventDefault();
+      wrapSelection('**', '**', commandPlaceholder('bold', 'Bold'));
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
+      event.preventDefault();
+      wrapSelection('*', '*', '斜体');
+    }
+  });
+  render();
+})();
+</script>`;
+  const editorField = `<div class="post-editor" data-view="split"><div class="post-editor__controls"><div class="post-editor__toolbar" role="toolbar" aria-label="Markdown 工具栏"><button type="button" data-command="enable-markdown" aria-label="转换为 Markdown">启用 Markdown</button><button type="button" data-requires-markdown data-command="bold" data-placeholder="粗体" aria-label="加粗">B</button><button type="button" data-requires-markdown data-command="italic" data-placeholder="斜体" aria-label="斜体"><em>I</em></button><button type="button" data-requires-markdown data-command="heading" aria-label="二级标题">H2</button><button type="button" data-requires-markdown data-command="quote" aria-label="引用">❝</button><button type="button" data-requires-markdown data-command="unordered-list" aria-label="无序列表">• 列表</button><button type="button" data-requires-markdown data-command="ordered-list" aria-label="有序列表">1. 列表</button><button type="button" data-requires-markdown data-command="link" data-placeholder="链接文本" aria-label="插入链接">链接</button><button type="button" data-requires-markdown data-command="image" data-placeholder="图片说明" aria-label="插入图片">图片</button><button type="button" data-requires-markdown data-command="code" data-placeholder="代码" aria-label="代码块">代码</button></div><div class="post-editor__view-switch" role="group" aria-label="编辑器视图"><button type="button" data-view-button="source" aria-pressed="false">源码</button><button type="button" data-view-button="preview" aria-pressed="false">预览</button><button type="button" data-view-button="split" aria-pressed="true">分屏</button></div></div><div class="post-editor__panes"><section class="post-editor__source" aria-labelledby="post-editor-source-title"><h2 id="post-editor-source-title">Markdown 源码</h2><textarea id="post-editor-source" name="text" rows="20" spellcheck="false" aria-label="Markdown 源码">${escapeHtml(row?.text ?? '<!--markdown-->')}</textarea></section><section class="post-editor__preview" aria-labelledby="post-editor-preview-title"><h2 id="post-editor-preview-title">预览</h2><div class="post-editor__preview-content" data-preview-content></div></section></div><p class="post-editor__hint">新文章使用 Markdown；旧版 AutoP 正文保持原格式。点击“启用 Markdown”会显式转换正文格式，源码就是实际保存内容。</p>${editorScript}</div>`;
+  const body = `<h1>${row ? '编辑' : '新建'}${noun}</h1>${request.query.has('saved') ? '<p role="status">已保存。</p>' : ''}<form method="post" action="${escapeHtml(action)}"><input type="hidden" name="cid" value="${row?.cid ?? 0}"><label>标题<input required maxlength="150" name="title" value="${escapeHtml(row?.title ?? '')}"></label><label>缩略名<input maxlength="150" name="slug" value="${escapeHtml(row?.slug ?? '')}" placeholder="留空自动生成"></label><div class="post-editor__field"><span>正文</span>${editorField}</div>${taxonomyControls}<label>状态<select name="status">${option('publish', '公开')}${option('draft', '草稿')}${option('private', '私密')}</select></label><label class="check"><input type="checkbox" name="allowComment" value="1"${row?.allowComment === '1' || !row ? ' checked' : ''}>允许评论</label><button type="submit">保存${noun}</button></form>`;
   return adminPage(`${row ? '编辑' : '新建'}${noun}`, request, body);
 }
 

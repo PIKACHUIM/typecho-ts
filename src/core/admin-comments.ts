@@ -112,7 +112,7 @@ function listPage(request: RequestContext, user: AuthUser, secret: string, statu
     const controls = actions.filter((action) => action === 'delete' || action !== row.status).map((action) =>
       `<form method="post" action="${root}/action/comments-edit?do=${action}&amp;_=${token}"><input type="hidden" name="coid" value="${row.coid}"><button type="submit">${labels[action]}</button></form>`
     ).join('');
-    return `<tr><td>${escapeHtml(row.author ?? '')}<small>${escapeHtml(row.mail ?? '')}</small></td><td>${escapeHtml(row.title ?? `#${row.cid}`)}<small>#${row.coid} · ${escapeHtml(row.type)}</small></td><td class="comment">${escapeHtml(row.text ?? '')}</td><td>${controls}</td></tr>`;
+    return `<tr><td><span data-i18n-skip>${escapeHtml(row.author ?? '')}</span><small data-i18n-skip>${escapeHtml(row.mail ?? '')}</small></td><td><span data-i18n-skip>${escapeHtml(row.title ?? `#${row.cid}`)}</span><small>#${row.coid} · ${escapeHtml(row.type)}</small></td><td class="comment"><span data-i18n-skip>${escapeHtml(row.text ?? '')}</span></td><td>${controls}</td></tr>`;
   }).join('');
   const previous = page > 1 ? `<a href="${list}?status=${status}&amp;page=${page - 1}">上一页</a>` : '';
   const next = rows.length > pageSize ? `<a href="${list}?status=${status}&amp;page=${page + 1}">下一页</a>` : '';

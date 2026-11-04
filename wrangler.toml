@@ -3,12 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Theme/plugin PHP sources are bundled into the worker, so static assets stay
-# limited to css/js/img. `/usr/uploads/*` is served from R2 by the worker.
+# Runtime-installed theme assets and uploads are served by the Worker before static fallback.
 [assets]
 directory = "./public"
 binding = "ASSETS"
 not_found_handling = "none"
+run_worker_first = ["/usr/themes/*", "/usr/uploads/*"]
 
 [dev]
 port = 8787

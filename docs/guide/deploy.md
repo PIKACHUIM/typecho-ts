@@ -1,6 +1,6 @@
 # 部署到 Cloudflare
 
-部署流程会创建 Worker、D1、R2 并应用表结构。空数据库首次访问会显示初始化向导，可设置站点信息并创建管理员账户；登录入口为 `/admin/login.php`。后台已提供基础文章、页面、分类标签、评论审核、用户、站点设置、主题/后台外观切换、媒体附件和 R2 附件 URL 设置，并使用统一后台导航布局。内置插件 Hook 仅支持示例后台菜单；任意第三方插件、完整主题兼容、其余后台页面、XML-RPC 及数据导入尚未实现，**不建议承载正式站点或重要数据**。
+部署流程会创建 Worker、D1、R2 并应用表结构。空数据库首次访问 `/install.php` 会显示可选中文或英文的初始化向导；完成后可在 `/admin/login.php` 登录。后台已提供文章/页面编辑（Markdown 分屏编辑器）、分类标签、评论审核、用户、站点设置、三种外观/暗色模式/中英文、媒体附件及 ZIP 主题和插件管理。运行时安装支持受限 PHP 解释器可执行的主题文件，以及只实现 `admin/menu.php` 菜单 Hook 的插件，不代表兼容任意 Typecho 主题或插件；安装代码包是对管理员信任的 PHP 代码执行操作。其余 Typecho 后台页面、XML-RPC 及数据导入尚未实现，**不建议承载正式站点或重要数据**。
 
 ## 一键部署
 
@@ -42,7 +42,7 @@ npm run deploy
 
 R2 通过 Worker 的 `BUCKET` 绑定连接，默认 bucket 名为 `typecho-files`。本地配置见 `wrangler.toml`；线上在 Worker 的 Settings → Bindings 中添加同名变量绑定到 R2 Bucket。管理员可在 `/admin/options-media.php` 留空使用 Worker 代理，或设置已指向该 Bucket 的 HTTPS 自定义域名/URL 前缀。保存 URL 前缀不会创建 R2 公共域名，也不会验证外部域名映射。
 
-主题和插件 PHP 源码在 Worker 构建时打包，**不是后台 ZIP 在线安装**。添加代码后运行 `npm run gen`、测试并重新部署，主题才会出现在 `/admin/themes.php`；普通附件仍在 `/admin/manage-medias.php` 上传。
+主题/插件 ZIP 在 `/admin/packages.php` 由管理员上传后存入 R2 的版本化前缀，并立即加入 D1 扩展目录，无需重部署 Worker。每包压缩文件上限 1 MB、解压后 8 MB、100 个文件，单个 PHP 文件最多 1 MB；拒绝路径穿越、链接、加密压缩包和不支持的文件类型。主题 ZIP 的根目录必须含 `index.php`，其余 PHP include 与主题资源目录按原有相对结构打包；插件 ZIP 当前只允许根目录单文件 `Plugin.php`，命名空间须为 `TypechoPlugin\\<标识符>`，并只支持 `admin/menu.php` 的后台导航 Hook。安装后可在后台切换主题、启停或卸载扩展；卸载会删除该扩展对应的 R2 版本前缀。**只安装可信来源的 PHP 包**；受限解释器并不意味着任意第三方代码兼容。普通图片附件仍在 `/admin/manage-medias.php` 上传。
 
 ## 部署后会看到什么
 

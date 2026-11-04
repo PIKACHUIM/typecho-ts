@@ -256,7 +256,7 @@ function mediaPage(request: RequestContext, user: AuthUser, secret: string, rows
   const entries = rows.slice(0, 50).map((row) => {
     const attachment = parseAttachment(row.text);
     const url = attachment ? attachmentPublicUrl(request.rootUrl, attachment.path, attachmentUrlPrefix) : '';
-    return `<tr><td>${url ? `<a href="${escapeHtml(url)}">${escapeHtml(row.title)}</a>` : escapeHtml(row.title)}</td><td>${attachment ? escapeHtml(`${Math.ceil(attachment.size / 1024)} Kb`) : '未知'}</td><td><form method="post" action="${escapeHtml(deleteAction)}"><input type="hidden" name="do" value="delete"><input type="hidden" name="cid" value="${row.cid}"><button type="submit"${attachment ? '' : ' disabled'}>删除</button></form></td></tr>`;
+    return `<tr><td>${url ? `<a href="${escapeHtml(url)}"><span data-i18n-skip>${escapeHtml(row.title)}</span></a>` : `<span data-i18n-skip>${escapeHtml(row.title)}</span>`}</td><td>${attachment ? escapeHtml(`${Math.ceil(attachment.size / 1024)} Kb`) : '未知'}</td><td><form method="post" action="${escapeHtml(deleteAction)}"><input type="hidden" name="do" value="delete"><input type="hidden" name="cid" value="${row.cid}"><button type="submit"${attachment ? '' : ' disabled'}>删除</button></form></td></tr>`;
   }).join('');
   const previous = page > 1 ? `<a href="${escapeHtml(request.rootUrl)}/admin/manage-medias.php?page=${page - 1}">上一页</a>` : '';
   const next = rows.length > 50 ? `<a href="${escapeHtml(request.rootUrl)}/admin/manage-medias.php?page=${page + 1}">下一页</a>` : '';

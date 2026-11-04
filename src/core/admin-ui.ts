@@ -9,12 +9,15 @@ const navigation = [
   { label: '标签管理', href: '/admin/manage-tags.php' },
   { label: '评论管理', href: '/admin/manage-comments.php' },
   { label: '用户管理', href: '/admin/manage-users.php' },
+  { label: '个人资料', href: '/admin/profile.php' },
   { label: '媒体管理', href: '/admin/manage-medias.php' },
   { label: '基本设置', href: '/admin/options-general.php' },
+  { label: '固定链接', href: '/admin/options-routing.php' },
   { label: '阅读设置', href: '/admin/options-reading.php' },
   { label: '评论设置', href: '/admin/options-discussion.php' },
   { label: '主题管理', href: '/admin/themes.php' },
   { label: '插件管理', href: '/admin/plugins.php' },
+  { label: '扩展安装', href: '/admin/packages.php' },
   { label: '附件设置', href: '/admin/options-media.php' },
 ] as const;
 

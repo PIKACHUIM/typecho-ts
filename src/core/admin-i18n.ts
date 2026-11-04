@@ -31,9 +31,47 @@ const ENGLISH: Record<string, string> = {
   '主题管理': 'Themes',
   '插件管理': 'Plugins',
   '附件设置': 'Attachments',
+  '扩展安装': 'Package installation',
+  '固定链接': 'Permalinks',
+  '固定链接设置已保存。': 'Permalink settings saved.',
+  '选择站点内容链接是否使用简洁路径。Worker 路由始终启用；关闭重写只会在链接中保留': 'Choose whether site content links use pretty paths. Worker routing remains enabled; disabling rewriting only keeps',
+  'index.php': 'index.php',
+  '启用简洁链接': 'Enable pretty links',
+  '链接预览': 'Link preview',
+  '启用：': 'Enabled: ',
+  '关闭：': 'Disabled: ',
+  '保存链接设置': 'Save permalink settings',
+  'Markdown 工具栏': 'Markdown toolbar',
+  '转换为 Markdown': 'Convert to Markdown',
+  '启用 Markdown': 'Enable Markdown',
+  '加粗': 'Bold',
+  '粗体': 'Bold text',
+  '斜体': 'Italic',
+  '二级标题': 'Heading level 2',
+  '引用': 'Quote',
+  '无序列表': 'Bulleted list',
+  '有序列表': 'Numbered list',
+  '插入链接': 'Insert link',
+  '插入图片': 'Insert image',
+  '图片': 'Image',
+  '图片说明': 'Image description',
+  'Image description': 'Image description',
+  '代码块': 'Code block',
+  '链接': 'Link',
+  '链接文本': 'Link text',
+  '代码': 'Code',
+  '源码': 'Source',
+  '预览': 'Preview',
+  '分屏': 'Split view',
+  '编辑器视图': 'Editor view',
+  'Markdown 源码': 'Markdown source',
+  '支持基础 Markdown；源码保留为保存内容。': 'Basic Markdown is supported. Source text is what gets saved.',
+  '新文章使用 Markdown；旧版 AutoP 正文保持原格式。点击“启用 Markdown”会显式转换正文格式，源码就是实际保存内容。': 'New posts use Markdown. Legacy AutoP content keeps its format until you explicitly enable Markdown. The source is what gets saved.',
   '后台导航': 'Admin navigation',
   '管理后台': 'Admin Dashboard',
   '查看站点': 'View site',
+  '：': ':',
+  '剩余': 'Remaining',
   '外观设置': 'Appearance',
   '主题与外观': 'Themes & Appearance',
   '主题设置': 'Theme settings',
@@ -84,6 +122,8 @@ const ENGLISH: Record<string, string> = {
   'visitor': 'Visitor',
   'Bucket 通过 Cloudflare Worker 的': 'Bucket is connected through the Cloudflare Worker binding',
   '绑定连接，不在这里填写凭据。当前部署配置中的 Bucket 名称：': '. Credentials are not entered here. Bucket name in the current deployment configuration:',
+  '绑定连接，不在这里填写凭据。': 'Credentials are not entered here.',
+  '当前部署配置中的 Bucket 名称：': ' Bucket name in the current deployment configuration:',
   '：请在 Wrangler/Cloudflare Worker 配置中绑定名为': ': bind a bucket named',
   '的 R2 Bucket。': ' as an R2 bucket in Wrangler or Cloudflare Worker settings.',
   '：请检查 Bucket 绑定与 Worker 权限。': ': check the bucket binding and Worker permissions.',
@@ -292,7 +332,71 @@ const ENGLISH: Record<string, string> = {
   '两次输入的密码不一致。': 'The passwords do not match.',
   '中国标准时间为 28800 秒（UTC+8）。': 'China Standard Time is 28,800 seconds (UTC+8).',
   '安装 Typecho': 'Install Typecho',
+  '初始化': 'Installation',
+  '管理员密码最多可使用 72 个 UTF-8 字节。': 'Administrator passwords are limited to 72 UTF-8 bytes.',
+  '站点地址必须是有效的 HTTP 或 HTTPS URL。': 'The site URL must be a valid HTTP or HTTPS URL.',
+  '时区偏移超出允许范围。': 'The time zone offset is outside the allowed range.',
+  '初始化未能完成，数据库没有被覆盖。请确认迁移已执行后重试。': 'Installation could not be completed. No existing data was overwritten. Confirm migrations have run, then try again.',
+  '主题与插件安装': 'Install Themes & Plugins',
+  '可通过': 'You can use ',
+  '上传可信 ZIP，主题 PHP 会由当前 Worker 的受限解释器运行，静态文件通过 R2 提供。安装不会重新部署 Worker；插件仅支持受限的后台菜单 Hook。': 'to upload a trusted ZIP. Theme PHP runs in the Worker’s restricted interpreter and static files are served from R2. Installation does not redeploy the Worker; plugins are limited to the restricted admin menu hook.',
+  '主题 PHP 会由当前 Worker 的受限解释器运行，静态文件通过 R2 提供。安装不会重新部署 Worker；插件仅支持受限的后台菜单 Hook。': 'Theme PHP runs in the Worker’s restricted interpreter and static files are served from R2. Installation does not redeploy the Worker; plugins are limited to the restricted admin menu hook.',
+  '上传可信 ZIP，主题 PHP 会由当前 Worker 的受限解释器运行，静态文件通过 R2 提供。': 'Upload a trusted ZIP. Theme PHP runs in the Worker’s restricted interpreter, and static files are served from R2.',
+  '安全说明': 'Security notes',
+  '上传即代表信任该 ZIP 中的 PHP 代码。主题在前台 Worker 中以受限 PHP 解释器运行；插件仅支持后台菜单 Hook、输出与指令预算。此功能不会重新部署 Worker，也不等于兼容任意 Typecho 扩展。仅安装可信来源的文件。': 'Uploading a ZIP means you trust its PHP code. Themes run in a restricted PHP interpreter; plugins are limited to the admin menu hook, output, and instruction budget. This does not redeploy the Worker or guarantee compatibility with arbitrary Typecho extensions. Install files only from trusted sources.',
+  '每个 ZIP 最大 1 MB，解压后最多 8 MB、100 个文件；拒绝路径穿越、链接、加密档案和不支持的格式。安装会保存新版本，不覆盖已安装的同名扩展。': 'Each ZIP is limited to 1 MB, 8 MB uncompressed, and 100 files. Path traversal, links, encrypted archives, and unsupported formats are rejected. Installs create a versioned package and do not overwrite an existing package with the same identifier.',
+  '扩展类型': 'Extension type',
+  '主题': 'Theme',
+  '插件': 'Plugin',
+  '标识符（英文和数字）': 'Identifier (letters and numbers)',
+  'ZIP 文件': 'ZIP file',
+  '安装后立即启用（主题切换前台；插件运行受限菜单 Hook）': 'Enable after installation (switch the public theme or run the restricted plugin menu hook)',
+  '上传并安装': 'Upload and install',
+  '已安装主题': 'Installed themes',
+  '已安装插件': 'Installed plugins',
+  '标识符': 'Identifier',
+  '版本': 'Version',
+  '使用状态': 'Usage',
+  '卸载': 'Uninstall',
+  '已安装': 'Installed',
+  '暂无在线安装的主题': 'No themes installed from ZIP',
+  '暂无在线安装的插件': 'No plugins installed from ZIP',
+  'ZIP 已安装。': 'ZIP package installed.',
+  '扩展已卸载。': 'Extension uninstalled.',
+  'ZIP 上传请求过大。': 'ZIP upload request is too large.',
+  '无效的 ZIP 上传表单。': 'Invalid ZIP upload form.',
+  '无效的安装请求。': 'Invalid installation request.',
+  '扩展类型或标识符无效。': 'Invalid extension type or identifier.',
+  'ZIP 文件必须为 22 字节至 1 MB。': 'ZIP files must be between 22 bytes and 1 MB.',
+  'ZIP 文件无效或超过 1 MB。': 'The ZIP file is invalid or exceeds 1 MB.',
+  '不支持多卷或损坏的 ZIP 文件。': 'Multi-volume or corrupted ZIP files are not supported.',
+  'ZIP 文件条目数或中央目录无效。': 'The ZIP entry count or central directory is invalid.',
+  'ZIP 中央目录损坏。': 'The ZIP central directory is corrupted.',
+  'ZIP 包含加密、跨卷或不支持压缩的条目。': 'The ZIP contains encrypted, split, or unsupported compressed entries.',
+  'ZIP 路径必须使用有效 UTF-8。': 'ZIP paths must use valid UTF-8.',
+  'ZIP 路径无效。': 'The ZIP path is invalid.',
+  'ZIP 包含重复文件路径。': 'The ZIP contains duplicate file paths.',
+  'ZIP 解压后超过 8 MB 限制。': 'The ZIP exceeds the 8 MB uncompressed size limit.',
+  'ZIP 中央目录长度不匹配或为空。': 'The ZIP central directory length is inconsistent or empty.',
+  'ZIP 文件尺寸校验失败。': 'ZIP file size verification failed.',
+  'ZIP 根目录结构无效。': 'The ZIP root directory structure is invalid.',
+  '受限插件 ZIP 当前只允许单个根目录 Plugin.php 文件。': 'Restricted plugin ZIPs may contain only a root Plugin.php file.',
+  '插件命名空间必须与标识符一致。': 'The plugin namespace must match its identifier.',
+  '单个 PHP 文件不能超过 1 MB。': 'Individual PHP files must not exceed 1 MB.',
+
+  'ZIP 校验失败。': 'ZIP validation failed.',
+  'PHP 入口文件无法解析或扩展标识符不匹配。': 'The PHP entry file is invalid or its extension identifier does not match.',
+  '无法保存 ZIP 扩展，请检查 R2 绑定后重试。': 'Could not store the ZIP package. Check the R2 binding and try again.',
+  '找不到在线安装的插件。': 'Installed plugin not found.',
+  '找不到在线安装的主题。': 'Installed theme not found.',
+  '不支持的扩展操作。': 'Unsupported extension operation.',
+  '主题标识符已存在。': 'A theme with this identifier is already installed.',
+  '插件标识符已存在。': 'A plugin with this identifier is already installed.',
+  '主题 ZIP 缺少 index.php。': 'The theme ZIP must contain index.php at its root.',
+  '插件 ZIP 缺少 Plugin.php。': 'The plugin ZIP must contain Plugin.php at its root.',
+  '。': '.',
   '确认删除？': 'Confirm deletion?',
+
   '取消': 'Cancel',
   '保存': 'Save',
   '返回后台': 'Back to dashboard',
@@ -313,6 +417,7 @@ export function localizeAdminText(text: string, locale: AdminLocale): string {
     [/^页面 (\d+)$/, (match) => `Page ${match[1]}`],
     [/^(\d+) 个子分类$/, (match) => `${match[1]} subcategories`],
     [/^(.+) 的子分类$/, (match) => `${match[1]} subcategories`],
+    [/^ZIP 文件类型不支持：(.+)$/, (match) => `Unsupported ZIP file type: ${match[1]}`],
   ];
   for (const [pattern, translate] of patterns) {
     const match = text.match(pattern);
@@ -321,20 +426,41 @@ export function localizeAdminText(text: string, locale: AdminLocale): string {
   return text;
 }
 
+function translateTextSegment(segment: string, locale: AdminLocale): string {
+  const leading = /^\s*/.exec(segment)?.[0] ?? '';
+  const trailing = /\s*$/.exec(segment)?.[0] ?? '';
+  const key = segment.trim();
+  if (!key) return segment;
+  const value = localizeAdminText(key, locale);
+  return value === key ? segment : `${leading}${value}${trailing}`;
+}
+
 export function localizeAdminHtml(html: string, locale: AdminLocale): string {
   if (locale !== 'en-US') return html;
-  const chunks = html.split(/(<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>)/gi);
-  const translated = chunks.map((chunk, index) => {
-    if (index % 2 === 1) return chunk;
-    return chunk.replace(/>([^<>]+)</g, (match, text: string) => {
-      const leading = /^\s*/.exec(text)?.[0] ?? '';
-      const trailing = /\s*$/.exec(text)?.[0] ?? '';
-      const key = text.trim();
-      const value = localizeAdminText(key, locale);
-      return value !== key ? `>${leading}${value}${trailing}<` : match;
-    });
-  }).join('');
-  const withAttributes = translated.replace(/\b(placeholder|aria-label|title|alt|data-uploading-label|data-empty-label)=(['"])(.*?)\2/gi, (match, name: string, quote: string, value: string) => {
+  const skippedElements = new Set(['script', 'style', 'textarea', 'pre', 'code']);
+  const tagPattern = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g;
+  let translated = '';
+  let cursor = 0;
+  let skipTag = '';
+  for (const match of html.matchAll(tagPattern)) {
+    const index = match.index ?? cursor;
+    const tag = match[0];
+    const textSegment = html.slice(cursor, index);
+    translated += skipTag ? textSegment : translateTextSegment(textSegment, locale);
+    translated += tag;
+    if (tag.startsWith('<!--')) {
+      cursor = index + tag.length;
+      continue;
+    }
+    const name = /^<\/?([A-Za-z][\w:-]*)/.exec(tag)?.[1]?.toLowerCase() ?? '';
+    const closing = /^<\//.test(tag);
+    if (skipTag && closing && name === skipTag) skipTag = '';
+    else if (!skipTag && !closing && !/\/\s*>$/.test(tag) && (skippedElements.has(name) || /\bdata-i18n-skip(?:\s|=|>)/i.test(tag))) skipTag = name;
+    cursor = index + tag.length;
+  }
+  const trailingText = html.slice(cursor);
+  translated += skipTag ? trailingText : translateTextSegment(trailingText, locale);
+  const withAttributes = translated.replace(/\b(placeholder|aria-label|title|alt|data-placeholder|data-uploading-label|data-empty-label)=(['"])(.*?)\2/gi, (match, name: string, quote: string, value: string) => {
     const localizedValue = localizeAdminText(value, locale);
     return localizedValue !== value ? `${name}=${quote}${localizedValue}${quote}` : match;
   }).replace(/confirm\((['"])([^'"]+)\1\)/g, (match, quote: string, value: string) => {

@@ -148,6 +148,11 @@ describe('first-run installer', () => {
     expect(html).toContain('value="3600"');
     expect(html).not.toContain('secure-pass-123');
     expect(html).not.toContain('name="password" value=');
+
+    const invalidUrl = await renderInstaller(db, buildRequestContext(installPost(token, token, 'https://example.test', 'en-US', {
+      title: 'Valid title', mail: 'valid@example.test', siteUrl: 'file:///invalid',
+    })));
+    expect(await invalidUrl.text()).toContain('The site URL must be a valid HTTP or HTTPS URL.');
   });
 
   it('persists the submitted English preference without exposing credentials in the redirect', async () => {
@@ -160,6 +165,11 @@ describe('first-run installer', () => {
     expect(response.headers.get('location')).toBe('https://example.test/admin/login.php?installed=1');
     expect(response.headers.get('location')).not.toContain('secure-pass-123');
     expect(options.some(({ params }) => params[0] === 'adminLocale' && params[1] === 'en-US')).toBe(true);
+    const contentRows = batches[0].filter(({ sql }) => sql.includes('INSERT INTO typecho_contents'));
+    expect(contentRows[0]?.params).toContain('Welcome to Typecho');
+    expect(contentRows[0]?.params).toContain('<!--markdown-->Welcome to your new site. Sign in to the dashboard to write your first post.');
+    expect(contentRows[1]?.params).toContain('About');
+    expect(batches[0].some(({ params }) => params[0] === 'Uncategorized')).toBe(true);
   });
 
   it.each(['users', 'options', 'contents', 'metas', 'comments', 'relationships', 'fields'] as SiteTable[])(

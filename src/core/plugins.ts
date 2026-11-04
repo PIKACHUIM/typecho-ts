@@ -1,5 +1,6 @@
 import { createRuntime, Interpreter, makeHost, toStr, type ExecContext } from '../../php-compat';
 import { PLUGIN_SOURCES } from '../generated/plugins';
+import { parseInstalledPlugins } from './package-registry';
 import type { SiteOptions } from './options';
 
 const MAX_OUTPUT_BYTES = 4096;
@@ -11,15 +12,26 @@ export function bundledPluginNames(): string[] {
   return Object.keys(PLUGIN_SOURCES).sort();
 }
 
-/** Only a build-time PHP file can register and execute a supported hook. */
-export async function renderPluginNavBar(options: SiteOptions): Promise<string> {
+export function availablePluginNames(options?: SiteOptions): string[] {
+  const installed = parseInstalledPlugins(options?.get('installedPlugins')).map(({ slug }) => slug);
+  return [...new Set([...bundledPluginNames(), ...installed])].sort();
+}
+
+/** Executes bundled or administrator-installed PHP through the restricted menu-hook interpreter. */
+export async function renderPluginNavBar(options: SiteOptions, bucket?: R2Bucket): Promise<string> {
   const enabled = options.get('phpPluginHooks');
   if (!Array.isArray(enabled)) return '';
+  const installed = parseInstalledPlugins(options.get('installedPlugins'));
+  const installedBySlug = new Map(installed.map((pkg) => [pkg.slug, pkg]));
   const fragments: string[] = [];
-  for (const name of bundledPluginNames()) {
+  for (const name of availablePluginNames(options)) {
     if (!enabled.includes(name)) continue;
     try {
-      const source = PLUGIN_SOURCES[name]['Plugin.php'];
+      const bundled = PLUGIN_SOURCES[name]?.['Plugin.php'];
+      const pkg = installedBySlug.get(name);
+      const object = !bundled && bucket && pkg ? await bucket.get(`${pkg.prefix}/php/Plugin.php`) : null;
+      if (!bundled && (!object || object.size > 1024 * 1024)) continue;
+      const source = bundled ?? new TextDecoder().decode(await object!.arrayBuffer());
       const filename = `plugins/${name}/Plugin.php`;
       const out: string[] = [];
       let bytes = 0;

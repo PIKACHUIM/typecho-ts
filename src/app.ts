@@ -9,13 +9,16 @@ import { buildRequestContext, type RequestContext } from './core/request';
 import { localizeAdminHtml, localizeAdminText } from './core/admin-i18n';
 import { loadOptions, type SiteOptions } from './core/options';
 import { createSchema, isMissingTableError } from './core/schema';
-import { BundledThemeStore, makeIncludeResolver, normalize } from './core/theme';
+import { RuntimeThemeStore, makeIncludeResolver, normalize, type ThemeFileStore } from './core/theme';
+import { parseInstalledThemes, validSlug } from './core/package-registry';
 import { listCategories, listContents, listPages, listRecentComments } from './repo/content';
 import { handleAuthRequest, isInstallationComplete, renderInstaller } from './core/install-auth';
 import { handleAdminContentRequest } from './core/admin-content';
 import { handleAdminSettingsRequest } from './core/admin-settings';
+import { handleAdminRoutingRequest } from './core/admin-routing';
 import { handleAdminThemesRequest } from './core/admin-themes';
 import { handleAdminStorageRequest } from './core/admin-storage';
+import { handleAdminPackagesRequest } from './core/admin-packages';
 import { handleFeed } from './core/feed';
 import { handleCommentRequest } from './core/comment-action';
 import { handleUploadRequest } from './core/uploads';
@@ -67,12 +70,16 @@ export async function renderSite(env: Env, rawRequest: Request): Promise<Respons
 
   if (!(await isInstallationComplete(db))) return renderInstaller(db, request);
 
-  const authResponse = await handleAuthRequest(db, request, String(options.get('secret') ?? ''), options);
+  const authResponse = await handleAuthRequest(db, request, String(options.get('secret') ?? ''), options, env.BUCKET);
   if (authResponse) return authResponse;
   const contentResponse = await handleAdminContentRequest(db, request, String(options.get('secret') ?? ''));
   if (contentResponse) return contentResponse;
   const settingsResponse = await handleAdminSettingsRequest(db, request, String(options.get('secret') ?? ''));
   if (settingsResponse) return settingsResponse;
+  const routingResponse = await handleAdminRoutingRequest(db, request, String(options.get('secret') ?? ''));
+  if (routingResponse) return routingResponse;
+  const packagesResponse = await handleAdminPackagesRequest(db, request, String(options.get('secret') ?? ''), env.BUCKET, rawRequest);
+  if (packagesResponse) return packagesResponse;
   const themesResponse = await handleAdminThemesRequest(db, request, String(options.get('secret') ?? ''));
   if (themesResponse) return themesResponse;
   const storageResponse = await handleAdminStorageRequest(db, request, String(options.get('secret') ?? ''), env.BUCKET);
@@ -140,21 +147,32 @@ async function renderArchive(
 ): Promise<Response> {
   const { env, db, request, echo } = deps;
   const theme = String(options.get('theme') ?? 'default');
-  const store = new BundledThemeStore();
+  const installedThemes = parseInstalledThemes(options.get('installedThemes'));
+  const store = new RuntimeThemeStore(env.BUCKET, installedThemes);
+  const encoder = new TextEncoder();
+  let renderedBytes = 0;
+  const themeEcho = (value: unknown) => {
+    const text = toStr(value);
+    renderedBytes += encoder.encode(text).byteLength;
+    if (renderedBytes > 2 * 1024 * 1024) throw new Error('Theme output limit exceeded');
+    echo(text);
+  };
   const runtime = createRuntime({
     readFile: makeIncludeResolver(store, theme),
     timezoneOffset: Number(options.get('timezone') ?? 0),
-    echo,
+    maxOperations: 100_000,
+    echo: themeEcho,
   });
 
-  const archive = new Archive({ db, options, request, echo, params, type: routeName });
+  const themedDeps = { ...deps, echo: themeEcho };
+  const archive = new Archive({ db, options, request, echo: themeEcho, params, type: routeName });
 
   // Static widget classes need the live request context (options, db, echo).
-  registerRuntimeWidgets(runtime, deps, options, archive);
+  registerRuntimeWidgets(runtime, themedDeps, options, archive);
 
   const ctx: ExecContext = {
     out,
-    echo,
+    echo: themeEcho,
     runtime,
     file: `${theme}/index.php`,
     self: archive,
@@ -196,7 +214,7 @@ async function renderArchive(
   });
 }
 
-export async function chooseThemeFile(store: BundledThemeStore, theme: string, archive: Archive, notFound: boolean): Promise<string | null> {
+export async function chooseThemeFile(store: ThemeFileStore, theme: string, archive: Archive, notFound: boolean): Promise<string | null> {
   const kind = archive.archiveType;
   const slug = archive.archiveSlug;
   const specific = /^[A-Za-z0-9_-]{1,150}$/.test(slug) ? `${kind}/${slug}.php` : '';
@@ -281,16 +299,24 @@ async function renderNotFound(
   options: SiteOptions
 ): Promise<Response> {
   const theme = String(options.get('theme') ?? 'default');
-  const store = new BundledThemeStore();
+  const store = new RuntimeThemeStore(env.BUCKET, parseInstalledThemes(options.get('installedThemes')));
   const source = await store.read(theme, '404.php');
   if (!source) return new Response('Not Found', { status: 404 });
-  const runtime = createRuntime({ readFile: makeIncludeResolver(store, theme), echo, timezoneOffset: Number(options.get('timezone') ?? 0) });
-  const archive = new Archive({ db, options, request, echo, type: '404' });
+  const encoder = new TextEncoder();
+  let outputBytes = 0;
+  const themeEcho = (value: unknown) => {
+    const text = toStr(value);
+    outputBytes += encoder.encode(text).byteLength;
+    if (outputBytes > 2 * 1024 * 1024) throw new Error('Theme output limit exceeded');
+    echo(text);
+  };
+  const runtime = createRuntime({ readFile: makeIncludeResolver(store, theme), echo: themeEcho, maxOperations: 100_000, timezoneOffset: Number(options.get('timezone') ?? 0) });
+  const archive = new Archive({ db, options, request, echo: themeEcho, type: '404' });
   archive.archiveType = 'archive';
   archive.archiveSlug = '404';
   archive.titleText = '页面没找到';
-  registerRuntimeWidgets(runtime, { env, db, request, echo }, options, archive);
-  const interpreter = new Interpreter(runtime, { out, echo, runtime, file: `${theme}/404.php`, self: archive });
+  registerRuntimeWidgets(runtime, { env, db, request, echo: themeEcho }, options, archive);
+  const interpreter = new Interpreter(runtime, { out, echo: themeEcho, runtime, file: `${theme}/404.php`, self: archive });
   archive.renderInclude = async (file: string) => {
     const target = normalize(file);
     const code = await store.read(theme, target);
@@ -354,8 +380,51 @@ export async function applyAdminPreferences(env: Env, request: Request, response
   return new Response(themed, { status: response.status, statusText: response.statusText, headers });
 }
 
+function validPackageSlug(value: string | undefined): value is string {
+  return validSlug(value);
+}
+
+function packageAssetContentType(extension: string): string {
+  const types: Record<string, string> = {
+    '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif',
+    '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
+  };
+  return types[extension] ?? 'application/octet-stream';
+}
+
 export function createApp(): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
+
+  app.get('/usr/themes/*', async (c) => {
+    const path = new URL(c.req.url).pathname;
+    const relative = path.slice('/usr/themes/'.length);
+    let decoded: string;
+    try { decoded = decodeURIComponent(relative); } catch { return new Response('Not Found', { status: 404 }); }
+    const [slug, ...segments] = decoded.split('/');
+    const assetPath = segments.join('/');
+    const extension = assetPath.slice(assetPath.lastIndexOf('.')).toLowerCase();
+    if (!validPackageSlug(slug) || !assetPath || assetPath.includes('\\') || assetPath.split('/').some((part) => !part || part === '.' || part === '..') ||
+        !['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.woff', '.woff2', '.ttf', '.otf'].includes(extension)) {
+      return new Response('Not Found', { status: 404 });
+    }
+    const db = new Db(c.env.DB, c.env.DB_PREFIX ?? 'typecho_');
+    const row = await db.first<{ value: string | null }>("SELECT value FROM table.options WHERE name = 'installedThemes' AND user = 0");
+    let packages: unknown = [];
+    try { packages = JSON.parse(row?.value ?? '[]'); } catch { packages = []; }
+    const pkg = parseInstalledThemes(packages).find((item) => item.slug === slug);
+    if (!pkg) return c.env.ASSETS.fetch(c.req.raw);
+    const object = await c.env.BUCKET.get(`${pkg.prefix}/assets/${assetPath}`);
+    if (!object) return c.env.ASSETS.fetch(c.req.raw);
+    return new Response(object.body, {
+      headers: {
+        'content-type': packageAssetContentType(extension),
+        etag: object.httpEtag,
+        'cache-control': 'public, max-age=300',
+        'x-content-type-options': 'nosniff',
+      },
+    });
+  });
 
   app.get('/usr/uploads/*', async (c) => {
     const key = new URL(c.req.url).pathname.replace(/^\/usr\/uploads\//, 'uploads/');

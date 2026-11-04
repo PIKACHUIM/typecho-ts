@@ -3,6 +3,7 @@ import { handleAdminContentRequest } from '../src/core/admin-content';
 import { cookiePrefix, securityToken, typechoHash } from '../src/core/auth';
 import { Db } from '../src/core/db';
 import { buildRequestContext } from '../src/core/request';
+import { localizeAdminHtml } from '../src/core/admin-i18n';
 
 const base = 'https://example.test';
 const authCode = 'abcdef0123456789abcdef0123456789';
@@ -10,7 +11,7 @@ const user = { uid: 1, name: 'admin', group: 'administrator', screenName: 'Admin
 const cookie = `${cookiePrefix(base)}__typecho_uid=1; ${cookiePrefix(base)}__typecho_authCode=${encodeURIComponent(typechoHash(authCode, 'abcdef123'))}`;
 
 type Meta = { mid: number; name: string; type: string; count: number };
-function fakeDb(config: { existing?: boolean; relationships?: Array<[number, number]>; defaultCategory?: string } = {}) {
+function fakeDb(config: { existing?: boolean; existingText?: string; relationships?: Array<[number, number]>; defaultCategory?: string } = {}) {
   const statements: Array<{ sql: string; params: unknown[] }> = [];
   const metas: Meta[] = [
     { mid: 1, name: '技术', type: 'category', count: 0 },
@@ -21,7 +22,7 @@ function fakeDb(config: { existing?: boolean; relationships?: Array<[number, num
   ];
   const relationships = new Set((config.relationships ?? []).map(([cid, mid]) => `${cid}:${mid}`));
   const contents = new Map<number, { cid: number; type: string; title: string; slug: string; text: string; status: string; allowComment: string }>();
-  if (config.existing) contents.set(3, { cid: 3, type: 'post', title: '原文章', slug: 'original', text: '正文', status: 'publish', allowComment: '1' });
+  if (config.existing) contents.set(3, { cid: 3, type: 'post', title: '原文章', slug: 'original', text: config.existingText ?? '正文', status: 'publish', allowComment: '1' });
   for (const meta of metas) meta.count = [...relationships].filter((link) => link.endsWith(`:${meta.mid}`)).length;
   const d1 = {
     prepare(sql: string) {
@@ -128,6 +129,56 @@ describe('content administration', () => {
     expect(response?.headers.get('location')).toContain('/admin/write-post.php?cid=3');
     expect([...relationships].sort()).toEqual(['3:1', '3:2', '3:7']);
     expect(metas.map((meta) => meta.count)).toEqual([1, 1, 1, 0, 0]);
+  });
+
+  it('starts new article source with the markdown marker and saves submitted text verbatim', async () => {
+    const fixture = fakeDb();
+    const editor = await handleAdminContentRequest(fixture.db, buildRequestContext(new Request(`${base}/admin/write-post.php`, { headers: { cookie } })), 'secret');
+    const html = await editor?.text();
+    expect(html).toMatch(/<textarea[^>]*name="text"[^>]*>&lt;!--markdown--&gt;<\/textarea>/);
+
+    const source = 'Plain text without a marker **still verbatim**';
+    const form = formFor();
+    form.set('text', source);
+    expect((await submit(fixture.db, form))?.status).toBe(303);
+    const insert = fixture.statements.find(({ sql }) => sql.startsWith('INSERT INTO typecho_contents'));
+    expect(insert?.params[4]).toBe(source);
+  });
+
+  it('renders accessible split controls and escapes legacy source without changing its saved value', async () => {
+    const legacyText = 'Legacy **content**\n</textarea><script>alert(1)</script>';
+    const fixture = fakeDb({ existing: true, existingText: legacyText });
+    const editor = await handleAdminContentRequest(fixture.db, buildRequestContext(new Request(`${base}/admin/write-post.php?cid=3`, { headers: { cookie } })), 'secret');
+    const html = await editor?.text() ?? '';
+    expect(html).toContain('class="post-editor" data-view="split"');
+    expect(html).toContain('role="toolbar" aria-label="Markdown 工具栏"');
+    expect(html).toContain('data-command="enable-markdown"');
+    expect(html).toContain('data-requires-markdown');
+    expect(html).toContain('data-command="bold"');
+    expect(html).toContain('data-command="italic"');
+    expect(html).toContain('data-command="heading"');
+    expect(html).toContain('data-command="quote"');
+    expect(html).toContain('data-command="unordered-list"');
+    expect(html).toContain('data-command="ordered-list"');
+    expect(html).toContain('data-command="link"');
+    expect(html).toContain('data-command="image"');
+    expect(html).toContain('data-command="code"');
+    expect(html).toContain('data-view-button="source"');
+    expect(html).toContain('data-view-button="preview"');
+    expect(html).toContain('data-view-button="split"');
+    expect(html).toContain('Legacy **content**\n&lt;/textarea&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('</textarea><script>alert(1)</script>');
+    expect(localizeAdminHtml('<span data-i18n-skip>Legacy **content**</span>', 'en-US')).toContain('Legacy **content**');
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '';
+    expect(script).toContain('textContent');
+    expect(script).toContain('document.createElement');
+    expect(script).not.toMatch(/innerHTML\s*=/);
+
+    const form = formFor(3);
+    form.set('text', legacyText);
+    expect((await submit(fixture.db, form))?.status).toBe(303);
+    const update = fixture.statements.find(({ sql }) => sql.startsWith('UPDATE typecho_contents SET'));
+    expect(update?.params[3]).toBe(legacyText.replace(/\n/g, '\r\n'));
   });
 
   it('uses the valid default category when no category is selected, never a wrong-type or deleted option', async () => {

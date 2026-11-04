@@ -26,7 +26,7 @@
         "description": "Stores site settings and blog content. The deployment command applies D1 migrations."
       },
       "BUCKET": {
-        "description": "Stores uploaded image attachments; the current media manager accepts JPG, PNG, GIF and WebP files up to 5 MB."
+        "description": "Stores uploaded image attachments and administrator-installed versioned ZIP themes/plugins; theme assets are served by the Worker and PHP runs through the restricted interpreter."
       }
     }
   },

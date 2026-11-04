@@ -1,6 +1,6 @@
 import { escapeHtml } from './common';
 import { renderAdminShell } from './admin-ui';
-import { localizeAdminHtml, type AdminLocale } from './admin-i18n';
+import { localizeAdminHtml, localizeAdminText, type AdminLocale } from './admin-i18n';
 import { Db } from './db';
 import {
   clearLoginCookies,
@@ -15,7 +15,7 @@ import {
 } from './auth';
 import type { RequestContext } from './request';
 import type { SiteOptions } from './options';
-import { bundledPluginNames, renderPluginNavBar } from './plugins';
+import { availablePluginNames, renderPluginNavBar } from './plugins';
 
 const DEFAULT_ROUTES = {
   index: { url: '/', widget: '\\Widget\\Archive', action: 'render' },
@@ -93,31 +93,33 @@ export async function hasExistingSiteData(db: Db): Promise<boolean> {
 }
 
 export async function renderInstaller(db: Db, request: RequestContext): Promise<Response> {
+  const requestedLocale = resolveInstallLocale(request.url.searchParams.get('lang'));
   if (await isInstallationComplete(db)) return redirect(`${request.rootUrl}/`);
   if (await hasExistingSiteData(db)) {
-    return textResponse('数据库中已存在数据，安装已停止以保护现有数据。请检查 installed 配置或恢复备份。', 409);
+    return textResponse(localizeAdminText('数据库中已存在数据，安装已停止以保护现有数据。请检查 installed 配置或恢复备份。', requestedLocale), 409);
   }
   if (request.method.toUpperCase() !== 'POST') {
     const token = randomToken();
-    const locale = resolveInstallLocale(request.url.searchParams.get('lang'));
+    const locale = requestedLocale;
     const html = installerHtml(request, token, '', locale);
     const headers = new Headers({ 'content-type': 'text/html; charset=UTF-8' });
     headers.append('set-cookie', `typecho_install_token=${token}; Path=${cookiePath(request.rootUrl)}; Max-Age=3600; HttpOnly; SameSite=Strict${request.isSecure ? '; Secure' : ''}`);
     return new Response(html, { headers });
   }
 
-  if (!sameOriginRequest(request)) return textResponse('跨站请求已拒绝，请从当前站点重新打开安装页面。', 403);
+  if (!sameOriginRequest(request)) return textResponse(localizeAdminText('跨站请求已拒绝，请从当前站点重新打开安装页面。', requestedLocale), 403);
   const submittedToken = request.cookies.get('typecho_install_token') ?? '';
   const form = await request.body?.();
   const formToken = String(form?.get('_') ?? '');
   if (!/^[a-f0-9]{64}$/.test(submittedToken) || !constantTimeEquals(submittedToken, formToken)) {
-    return textResponse('安装验证已过期，请刷新页面后重试。', 403);
+    return textResponse(localizeAdminText('安装验证已过期，请刷新页面后重试。', requestedLocale), 403);
   }
+  const locale = resolveInstallLocale(form?.get('locale') ?? request.url.searchParams.get('lang'));
   if (await hasExistingSiteData(db)) {
-    return textResponse('数据库中已存在数据，安装已停止以保护现有数据。请检查 installed 配置或恢复备份。', 409);
+    return textResponse(localizeAdminText('数据库中已存在数据，安装已停止以保护现有数据。请检查 installed 配置或恢复备份。', locale), 409);
   }
 
-  const locale = resolveInstallLocale(form?.get('locale') ?? request.url.searchParams.get('lang'));
+
   const fields = {
     title: String(form?.get('title') ?? ''),
     description: String(form?.get('description') ?? ''),
@@ -153,6 +155,21 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
     ['adminLocale', locale],
     ['installed', '1'],
   ];
+  const seed = locale === 'en-US' ? {
+    category: 'Uncategorized',
+    postTitle: 'Welcome to Typecho',
+    postText: '<!--markdown-->Welcome to your new site. Sign in to the dashboard to write your first post.',
+    pageTitle: 'About',
+    pageText: '<!--markdown-->Introduce your site here.',
+    comment: 'Welcome to the Typecho community.',
+  } : {
+    category: '默认分类',
+    postTitle: '欢迎使用 Typecho',
+    postText: '<!--markdown-->欢迎来到你的新站点。你可以登录后台，开始撰写文章。',
+    pageTitle: '关于',
+    pageText: '<!--markdown-->在这里介绍你的站点。',
+    comment: '欢迎加入 Typecho 大家族',
+  };
   const statements = [
     {
       sql: `INSERT INTO table.users (uid, name, password, mail, url, screenName, created, activated, logged, "group", authCode)
@@ -161,23 +178,24 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
     },
     {
       sql: `INSERT INTO table.metas (mid, name, slug, type, description, count, "order", parent)
-            VALUES (1, '默认分类', 'default', 'category', '', 1, 1, 0)`,
+            VALUES (1, ?, 'default', 'category', '', 1, 1, 0)`,
+      params: [seed.category],
     },
     {
       sql: `INSERT INTO table.contents (cid, title, slug, created, modified, text, "order", authorId, template, type, status, password, commentsNum, allowComment, allowPing, allowFeed, parent)
-            VALUES (1, '欢迎使用 Typecho', 'start', ?, ?, '<!--markdown-->欢迎来到你的新站点。你可以登录后台，开始撰写文章。', 0, 1, NULL, 'post', 'publish', NULL, 1, '1', '1', '1', 0)`,
-      params: [now, now],
+            VALUES (1, ?, 'start', ?, ?, ?, 0, 1, NULL, 'post', 'publish', NULL, 1, '1', '1', '1', 0)`,
+      params: [seed.postTitle, now, now, seed.postText],
     },
     {
       sql: `INSERT INTO table.contents (cid, title, slug, created, modified, text, "order", authorId, template, type, status, password, commentsNum, allowComment, allowPing, allowFeed, parent)
-            VALUES (2, '关于', 'start-page', ?, ?, '<!--markdown-->在这里介绍你的站点。', 0, 1, NULL, 'page', 'publish', NULL, 0, '1', '1', '1', 0)`,
-      params: [now, now],
+            VALUES (2, ?, 'start-page', ?, ?, ?, 0, 1, NULL, 'page', 'publish', NULL, 0, '1', '1', '1', 0)`,
+      params: [seed.pageTitle, now, now, seed.pageText],
     },
     { sql: `INSERT INTO table.relationships (cid, mid) VALUES (1, 1)` },
     {
       sql: `INSERT INTO table.comments (coid, cid, created, author, authorId, ownerId, mail, url, ip, agent, text, type, status, parent)
-            VALUES (1, 1, ?, 'Typecho', 0, 1, 'hello@typecho.org', 'https://typecho.org', '127.0.0.1', 'Typecho', '欢迎加入 Typecho 大家族', 'comment', 'approved', 0)`,
-      params: [now],
+            VALUES (1, 1, ?, 'Typecho', 0, 1, 'hello@typecho.org', 'https://typecho.org', '127.0.0.1', 'Typecho', ?, 'comment', 'approved', 0)`,
+      params: [now, seed.comment],
     },
     ...options.map(([name, value]) => ({
       sql: `INSERT INTO table.options (name, "user", value) VALUES (?, 0, ?)`,
@@ -198,14 +216,14 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
   return new Response(null, { status: 303, headers });
 }
 
-export async function handleAuthRequest(db: Db, request: RequestContext, secret: string, options?: SiteOptions): Promise<Response | null> {
+export async function handleAuthRequest(db: Db, request: RequestContext, secret: string, options?: SiteOptions, bucket?: R2Bucket): Promise<Response | null> {
   const path = request.pathInfo.replace(/\/+$/, '') || '/';
   if (path === '/admin') {
     if (request.method.toUpperCase() !== 'GET') return textResponse('Method Not Allowed', 405);
     const user = await findCurrentUser(db, request);
     if (!user) return redirect(`${request.rootUrl}/admin/login.php?referer=${encodeURIComponent(`${request.rootUrl}/admin/`)}`);
     const logoutUrl = `${request.rootUrl}/action/logout?_=${securityToken(secret, currentPageUrl(request), user)}`;
-    const pluginNav = user.group === 'administrator' && options ? await renderPluginNavBar(options) : '';
+    const pluginNav = user.group === 'administrator' && options ? await renderPluginNavBar(options, bucket) : '';
     return new Response(adminHomeHtml(request, user, logoutUrl, pluginNav), { headers: { 'content-type': 'text/html; charset=UTF-8' } });
   }
   if (path === '/admin/plugins.php' || path === '/action/plugins') {
@@ -231,7 +249,7 @@ async function handlePluginSettings(db: Db, request: RequestContext, secret: str
   const user = await findCurrentUser(db, request);
   if (!user) return redirect(`${request.rootUrl}/admin/login.php?referer=${encodeURIComponent(currentPageUrl(request))}`);
   if (user.group !== 'administrator') return textResponse('Forbidden', 403);
-  const names = bundledPluginNames();
+  const names = availablePluginNames(options);
   if (path === '/admin/plugins.php') {
     if (request.method !== 'GET') return textResponse('Method Not Allowed', 405);
     const value = options?.get('phpPluginHooks');
@@ -326,7 +344,7 @@ function loginHtml(request: RequestContext, secret: string, error = ''): string 
 
 function adminHomeHtml(request: RequestContext, user: AuthUser, logoutUrl: string, pluginNav = ''): string {
   const root = escapeHtml(request.rootUrl);
-  const body = `<section class="card wide"><p class="eyebrow">TYPECHO ADMIN</p><h1><span>欢迎，</span>${escapeHtml(user.screenName || user.name)}</h1><p class="muted">管理员账户已登录。</p><nav class="admin-nav" aria-label="管理菜单"><a class="back" href="${root}/admin/manage-posts.php">管理文章</a><a class="back" href="${root}/admin/manage-pages.php">管理页面</a><a class="back" href="${root}/admin/manage-categories.php">管理分类</a><a class="back" href="${root}/admin/manage-tags.php">管理标签</a><a class="back" href="${root}/admin/manage-comments.php">审核评论</a><a class="back" href="${root}/admin/manage-medias.php">管理媒体</a><a class="back" href="${root}/admin/manage-users.php">管理用户</a><a class="back" href="${root}/admin/options-general.php">站点设置</a><a class="back" href="${root}/admin/options-reading.php">阅读设置</a><a class="back" href="${root}/admin/options-discussion.php">评论设置</a>${user.group === 'administrator' ? `<a class="back" href="${root}/admin/plugins.php">插件 Hook</a>` : ''}${pluginNav}</nav><a class="back" href="${root}/">查看站点</a><a class="back" href="${escapeHtml(logoutUrl)}">退出登录</a></section>`;
+  const body = `<section class="card wide"><p class="eyebrow">TYPECHO ADMIN</p><h1><span>欢迎，</span><span data-i18n-skip>${escapeHtml(user.screenName || user.name)}</span></h1><p class="muted">管理员账户已登录。</p><nav class="admin-nav" aria-label="管理菜单"><a class="back" href="${root}/admin/manage-posts.php">管理文章</a><a class="back" href="${root}/admin/manage-pages.php">管理页面</a><a class="back" href="${root}/admin/manage-categories.php">管理分类</a><a class="back" href="${root}/admin/manage-tags.php">管理标签</a><a class="back" href="${root}/admin/manage-comments.php">审核评论</a><a class="back" href="${root}/admin/manage-medias.php">管理媒体</a><a class="back" href="${root}/admin/manage-users.php">管理用户</a><a class="back" href="${root}/admin/options-general.php">站点设置</a><a class="back" href="${root}/admin/options-reading.php">阅读设置</a><a class="back" href="${root}/admin/options-discussion.php">评论设置</a>${user.group === 'administrator' ? `<a class="back" href="${root}/admin/plugins.php">插件 Hook</a>` : ''}${pluginNav}</nav><a class="back" href="${root}/">查看站点</a><a class="back" href="${escapeHtml(logoutUrl)}">退出登录</a></section>`;
   return renderAdminShell('管理后台', request, body);
 }
 

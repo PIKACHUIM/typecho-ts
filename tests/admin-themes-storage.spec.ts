@@ -135,7 +135,7 @@ describe('theme and admin appearance settings', () => {
     expect(html).toContain('深色模式');
     expect(html).toContain('界面语言');
     expect(html).toContain('theme-card--ocean');
-    expect(html).toContain('npm run gen');
+    expect(html).toContain('/admin/packages.php');
     expect(html).toContain('/admin/css/style.css');
     expect(html).toContain('/admin/css/typecho-work.css');
     expect(html).toContain('/admin/options-media.php');
@@ -167,7 +167,7 @@ describe('theme and admin appearance settings', () => {
   it('localizes static text while preserving user content and uses four-character Chinese navigation labels', () => {
     const request = buildRequestContext(new Request(`${base}/admin/`));
     const html = renderAdminShell('管理后台', request, '<h1>文章管理</h1><p>访客内容</p>');
-    const labels = ['后台首页', '文章管理', '页面管理', '分类管理', '标签管理', '评论管理', '用户管理', '媒体管理', '基本设置', '阅读设置', '评论设置', '主题管理', '插件管理', '附件设置'];
+    const labels = ['后台首页', '文章管理', '页面管理', '分类管理', '标签管理', '评论管理', '用户管理', '媒体管理', '基本设置', '固定链接', '阅读设置', '评论设置', '主题管理', '插件管理', '附件设置', '个人资料', '扩展安装'];
     for (const label of labels) {
       expect([...label].length).toBe(4);
       expect(html).toContain(`>${label}</a>`);
@@ -178,8 +178,16 @@ describe('theme and admin appearance settings', () => {
     expect(english).toContain('Dashboard');
     expect(english).toContain('Posts');
     expect(english).toContain('访客内容');
-    const attributes = localizeAdminHtml('<input placeholder="留空自动生成"><p data-uploading-label="上传中…"></p><button onsubmit="return confirm(\'确认删除？\')">删除</button>', 'en-US');
+    const attributes = localizeAdminHtml('<input placeholder="留空自动生成"><textarea name="text">保存设置</textarea><p data-uploading-label="上传中…"></p><button onsubmit="return confirm(\'确认删除？\')">删除</button>', 'en-US');
     expect(attributes).toContain('placeholder="Leave blank to generate automatically"');
+    expect(attributes).toContain('<textarea name="text">保存设置</textarea>');
+    expect(localizeAdminHtml('<span data-i18n-skip>保存设置</span><p>保存设置</p>', 'en-US'))
+      .toBe('<span data-i18n-skip>保存设置</span><p>Save settings</p>');
+    const editorLabels = localizeAdminHtml('<div role="toolbar" aria-label="Markdown 工具栏"><button aria-label="转换为 Markdown" data-placeholder="链接文本">启用 Markdown</button><span>源码</span><span>预览</span><span>分屏</span></div>', 'en-US');
+    expect(editorLabels).toContain('aria-label="Markdown toolbar"');
+    expect(editorLabels).toContain('data-placeholder="Link text"');
+    expect(editorLabels).toContain('Enable Markdown');
+    expect(editorLabels).toContain('<span>Source</span><span>Preview</span><span>Split view</span>');
     expect(attributes).toContain('data-uploading-label="Uploading…"');
     expect(attributes).toContain("confirm('Confirm deletion?')");
     const pluginHtml = localizeAdminHtml('<p>Workers 不能在后台上传后自我部署插件。新增插件需放入项目 <code>plugins/</code>，在 <code>scripts/gen-themes.mjs</code> 中加入受控打包清单，运行 <code>npm run gen</code>、测试后重新部署。当前不是任意 Typecho 插件安装器。</p><p><code>HelloWorld</code>：<span>已启用</span></p>', 'en-US');
@@ -225,6 +233,8 @@ describe('R2 attachment URL settings', () => {
     expect(html).toContain('R2 绑定可用');
     expect(html).toContain('typecho-files');
     expect(html).toContain('不会验证域名映射');
+    expect(localizeAdminHtml('<p>Bucket 通过 Cloudflare Worker 的 <code>BUCKET</code> 绑定连接，不在这里填写凭据。</p>', 'en-US'))
+      .toContain('Bucket is connected through the Cloudflare Worker binding <code>BUCKET</code> Credentials are not entered here.');
     expect(localizeAdminHtml(html, 'en-US')).not.toMatch(/\p{Script=Han}/u);
   });
 
