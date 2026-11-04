@@ -1,5 +1,6 @@
 import { escapeHtml } from './common';
 import { renderAdminShell } from './admin-ui';
+import { localizeAdminHtml, type AdminLocale } from './admin-i18n';
 import { Db } from './db';
 import {
   clearLoginCookies,
@@ -48,7 +49,6 @@ const INSTALL_OPTIONS: Array<[string, string]> = [
   ['theme', 'default'],
   ['adminTheme', 'official'],
   ['adminMode', 'light'],
-  ['adminLocale', 'zh-CN'],
   ['attachmentUrlPrefix', ''],
   ['defaultCategory', '1'],
   ['rewrite', '1'],
@@ -99,7 +99,8 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
   }
   if (request.method.toUpperCase() !== 'POST') {
     const token = randomToken();
-    const html = installerHtml(request, token);
+    const locale = resolveInstallLocale(request.url.searchParams.get('lang'));
+    const html = installerHtml(request, token, '', locale);
     const headers = new Headers({ 'content-type': 'text/html; charset=UTF-8' });
     headers.append('set-cookie', `typecho_install_token=${token}; Path=${cookiePath(request.rootUrl)}; Max-Age=3600; HttpOnly; SameSite=Strict${request.isSecure ? '; Secure' : ''}`);
     return new Response(html, { headers });
@@ -116,17 +117,27 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
     return textResponse('数据库中已存在数据，安装已停止以保护现有数据。请检查 installed 配置或恢复备份。', 409);
   }
 
-  const title = String(form?.get('title') ?? '').trim();
-  const description = String(form?.get('description') ?? '').trim();
-  const username = String(form?.get('name') ?? '').trim();
-  const screenName = String(form?.get('screenName') ?? '').trim() || username;
-  const email = String(form?.get('mail') ?? '').trim();
+  const locale = resolveInstallLocale(form?.get('locale') ?? request.url.searchParams.get('lang'));
+  const fields = {
+    title: String(form?.get('title') ?? ''),
+    description: String(form?.get('description') ?? ''),
+    siteUrl: String(form?.get('siteUrl') ?? request.rootUrl),
+    name: String(form?.get('name') ?? ''),
+    screenName: String(form?.get('screenName') ?? ''),
+    mail: String(form?.get('mail') ?? ''),
+    timezone: String(form?.get('timezone') ?? '28800'),
+  };
+  const title = fields.title.trim();
+  const description = fields.description.trim();
+  const username = fields.name.trim();
+  const screenName = fields.screenName.trim() || username;
+  const email = fields.mail.trim();
   const password = String(form?.get('password') ?? '');
   const confirm = String(form?.get('confirm') ?? '');
-  const siteUrl = normalizeSiteUrl(String(form?.get('siteUrl') ?? ''), request.rootUrl);
-  const timezone = Number(form?.get('timezone') ?? 28800);
+  const siteUrl = normalizeSiteUrl(fields.siteUrl, request.rootUrl);
+  const timezone = Number(fields.timezone);
   const validation = validateInstallInput({ title, description, username, screenName, email, password, confirm, siteUrl, timezone });
-  if (validation) return renderInstallError(request, validation, tokenCookie(request));
+  if (validation) return renderInstallError(request, validation, tokenCookie(request), locale, fields);
 
   const now = Math.floor(Date.now() / 1000);
   const secret = typechoRandomString(32, true);
@@ -139,6 +150,7 @@ export async function renderInstaller(db: Db, request: RequestContext): Promise<
     ['secret', secret],
     ['routingTable', JSON.stringify(DEFAULT_ROUTES)],
     ...INSTALL_OPTIONS,
+    ['adminLocale', locale],
     ['installed', '1'],
   ];
   const statements = [
@@ -318,15 +330,33 @@ function adminHomeHtml(request: RequestContext, user: AuthUser, logoutUrl: strin
   return renderAdminShell('管理后台', request, body);
 }
 
-function installerHtml(request: RequestContext, token: string, error = ''): string {
-  const errorBlock = error ? `<p class="message" role="alert">${escapeHtml(error)}</p>` : '';
-  return pageHtml('初始化', request, `<section class="card wide"><p class="eyebrow">TYPECHO</p><h1>开始使用</h1><p class="muted">先设置站点信息和管理员账户，完成后即可登录。</p>${errorBlock}<form method="post" action="${escapeHtml(request.rootUrl)}/install.php"><input type="hidden" name="_" value="${escapeHtml(token)}"><label>站点标题<input name="title" maxlength="150" required value="${escapeHtml(request.url.searchParams.get('title') ?? '')}"></label><label>站点描述<input name="description" maxlength="255" value=""></label><label>站点地址<input name="siteUrl" type="url" required value="${escapeHtml(request.rootUrl)}"></label><div class="grid"><label>管理员用户名<input name="name" maxlength="32" autocomplete="username" required></label><label>显示名称<input name="screenName" maxlength="32" required></label></div><label>邮箱<input name="mail" type="email" maxlength="150" autocomplete="email" required></label><div class="grid"><label>密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label>确认密码<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label></div><label>时区偏移（秒）<input name="timezone" type="number" value="28800" min="-43200" max="50400" required><small>中国标准时间为 28800 秒（UTC+8）。</small></label><button type="submit">安装 Typecho</button></form></section>`);
+type InstallFields = {
+  title: string;
+  description: string;
+  siteUrl: string;
+  name: string;
+  screenName: string;
+  mail: string;
+  timezone: string;
+};
+
+function resolveInstallLocale(value: unknown): AdminLocale {
+  return value === 'en-US' ? 'en-US' : 'zh-CN';
 }
 
-function renderInstallError(request: RequestContext, error: string, cookie: string): Response {
+function installerHtml(request: RequestContext, token: string, error = '', locale: AdminLocale = resolveInstallLocale(request.url.searchParams.get('lang')), fields: Partial<InstallFields> = {}): string {
+  const value = (key: keyof InstallFields, fallback = '') => escapeHtml(fields[key] ?? fallback);
+  const errorBlock = error ? `<p class="message" role="alert">${escapeHtml(error)}</p>` : '';
+  const languageSwitch = `<nav aria-label="语言"><a href="${escapeHtml(request.rootUrl)}/install.php?lang=zh-CN">简体中文</a> · <a href="${escapeHtml(request.rootUrl)}/install.php?lang=en-US">English</a></nav>`;
+  const action = `${request.rootUrl}/install.php?lang=${locale}`;
+  const body = `<section class="card wide"><p class="eyebrow">TYPECHO</p>${languageSwitch}<h1>开始使用</h1><p class="muted">先设置站点信息和管理员账户，完成后即可登录。</p>${errorBlock}<form method="post" action="${escapeHtml(action)}"><input type="hidden" name="_" value="${escapeHtml(token)}"><input type="hidden" name="locale" value="${locale}"><label>站点标题<input name="title" maxlength="150" required value="${value('title', request.url.searchParams.get('title') ?? '')}"></label><label>站点描述<input name="description" maxlength="255" value="${value('description')}"></label><label>站点地址<input name="siteUrl" type="url" required value="${value('siteUrl', request.rootUrl)}"></label><div class="grid"><label>管理员用户名<input name="name" maxlength="32" autocomplete="username" required value="${value('name')}"></label><label>显示名称<input name="screenName" maxlength="32" required value="${value('screenName')}"></label></div><label>邮箱<input name="mail" type="email" maxlength="150" autocomplete="email" required value="${value('mail')}"></label><div class="grid"><label>密码<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label>确认密码<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label></div><label>时区偏移（秒）<input name="timezone" type="number" value="${value('timezone', '28800')}" min="-43200" max="50400" required><small>中国标准时间为 28800 秒（UTC+8）。</small></label><button type="submit">安装 Typecho</button></form></section>`;
+  return localizeAdminHtml(pageHtml('初始化', request, body), locale);
+}
+
+function renderInstallError(request: RequestContext, error: string, cookie: string, locale: AdminLocale, fields: InstallFields): Response {
   const headers = new Headers({ 'content-type': 'text/html; charset=UTF-8' });
   headers.append('set-cookie', cookie);
-  return new Response(installerHtml(request, request.cookies.get('typecho_install_token') ?? '', error), { status: 400, headers });
+  return new Response(installerHtml(request, request.cookies.get('typecho_install_token') ?? '', error, locale, fields), { status: 400, headers });
 }
 
 function validateInstallInput(input: {
@@ -344,8 +374,8 @@ function validateInstallInput(input: {
   if (input.description.length > 255) return '站点描述不能超过 255 个字符。';
   if (!/^[A-Za-z0-9_]{1,32}$/.test(input.username)) return '管理员用户名只能包含英文字母、数字和下划线，长度为 1–32 位。';
   if (!input.screenName || input.screenName.length > 32) return '显示名称不能为空，且不能超过 32 个字符。';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) || input.email.length > 150) return '请输入有效邮箱地址。';
-  if (input.password.length < 8) return '管理员密码至少需要 8 个字符。';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) || input.email.length > 150) return '请输入有效的邮箱地址。';
+  if (input.password.length < 8) return '密码至少需要 8 个字符。';
   if (new TextEncoder().encode(input.password).length > 72) return '管理员密码最多可使用 72 个 UTF-8 字节。';
   if (input.password !== input.confirm) return '两次输入的密码不一致。';
   if (!input.siteUrl) return '站点地址必须是有效的 HTTP 或 HTTPS URL。';

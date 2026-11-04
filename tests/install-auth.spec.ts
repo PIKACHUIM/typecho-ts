@@ -46,25 +46,25 @@ function mockDb(seed: Partial<Record<SiteTable, number>> = {}) {
   return { db: new Db(d1), batches, counts };
 }
 
-function installForm(token: string): FormData {
+function installForm(token: string, locale = 'zh-CN', overrides: Record<string, string> = {}): FormData {
   const form = new FormData();
   for (const [name, value] of Object.entries({
-    _: token, title: 'Example Site', description: 'A test blog', siteUrl: 'https://example.test',
+    _: token, locale, title: 'Example Site', description: 'A test blog', siteUrl: 'https://example.test',
     name: 'owner', screenName: 'Site Owner', mail: 'owner@example.test',
-    password: 'secure-pass-123', confirm: 'secure-pass-123', timezone: '28800',
+    password: 'secure-pass-123', confirm: 'secure-pass-123', timezone: '28800', ...overrides,
   })) form.set(name, value);
   return form;
 }
 
-function installPost(token: string, cookie = token, origin = 'https://example.test'): Request {
-  return new Request('https://example.test/install.php', {
+function installPost(token: string, cookie = token, origin = 'https://example.test', locale = 'zh-CN', overrides: Record<string, string> = {}): Request {
+  return new Request(`https://example.test/install.php?lang=${locale}`, {
     method: 'POST',
     headers: {
       cookie: `typecho_install_token=${cookie}`,
       origin,
       referer: 'https://example.test/install.php',
     },
-    body: installForm(token),
+    body: installForm(token, locale, overrides),
   });
 }
 
@@ -94,6 +94,7 @@ describe('first-run installer', () => {
     expect(userInsert?.params[0]).toBe('owner');
     expect(await compare('secure-pass-123', String(userInsert?.params[1]))).toBe(true);
     expect(optionsInsert.some(({ params }) => params[0] === 'title' && params[1] === 'Example Site')).toBe(true);
+    expect(optionsInsert.some(({ params }) => params[0] === 'adminLocale' && params[1] === 'zh-CN')).toBe(true);
     expect(optionsInsert.some(({ params }) => params[0] === 'defaultCategory' && params[1] === '1')).toBe(true);
     expect(optionsInsert.some(({ params }) => params[0] === 'installed' && params[1] === '1')).toBe(true);
     expect(optionsInsert.some(({ params }) => params[0] === 'phpPluginHooks' && params[1] === '[]')).toBe(true);
@@ -105,6 +106,60 @@ describe('first-run installer', () => {
     expect(router.match('/search/hello/')?.route.name).toBe('search');
     expect(router.match('/archives/1/comment-page-2')?.route.name).toBe('comment_page');
     expect(router.match('/feed/rss/')?.route.name).toBe('feed');
+  });
+
+  it('renders the selected language and falls back to Chinese for unsupported locales', async () => {
+    const { db } = mockDb();
+    const english = await renderInstaller(db, buildRequestContext(new Request('https://example.test/install.php?lang=en-US')));
+    const englishHtml = await english.text();
+    expect(englishHtml).toContain('<html lang="en-US"');
+    expect(englishHtml).toContain('Get started');
+    expect(englishHtml).toContain('Administrator username');
+    expect(englishHtml).toContain('action="https://example.test/install.php?lang=en-US"');
+    expect(englishHtml).toContain('name="locale" value="en-US"');
+    expect(englishHtml).toContain('href="https://example.test/install.php?lang=zh-CN"');
+    expect(englishHtml).toContain('href="https://example.test/install.php?lang=en-US"');
+
+    const unsupported = await renderInstaller(db, buildRequestContext(new Request('https://example.test/install.php?lang=fr')));
+    const unsupportedHtml = await unsupported.text();
+    expect(unsupportedHtml).toContain('<html lang="zh-CN"');
+    expect(unsupportedHtml).toContain('action="https://example.test/install.php?lang=zh-CN"');
+  });
+
+  it('preserves the selected locale and non-password fields after validation fails', async () => {
+    const { db } = mockDb();
+    const token = 'c'.repeat(64);
+    const response = await renderInstaller(db, buildRequestContext(installPost(token, token, 'https://example.test', 'en-US', {
+      title: 'Retained <title>', description: 'Retained description', siteUrl: 'https://saved.example.test',
+      name: 'saved_owner', screenName: 'Saved Owner', mail: 'invalid-email', timezone: '3600',
+    })));
+    const html = await response.text();
+
+    expect(response.status).toBe(400);
+    expect(html).toContain('<html lang="en-US"');
+    expect(html).toContain('Enter a valid email address.');
+    expect(html).toContain('action="https://example.test/install.php?lang=en-US"');
+    expect(html).toContain('value="Retained &lt;title&gt;"');
+    expect(html).toContain('value="Retained description"');
+    expect(html).toContain('value="https://saved.example.test"');
+    expect(html).toContain('value="saved_owner"');
+    expect(html).toContain('value="Saved Owner"');
+    expect(html).toContain('value="invalid-email"');
+    expect(html).toContain('value="3600"');
+    expect(html).not.toContain('secure-pass-123');
+    expect(html).not.toContain('name="password" value=');
+  });
+
+  it('persists the submitted English preference without exposing credentials in the redirect', async () => {
+    const { db, batches } = mockDb();
+    const token = 'd'.repeat(64);
+    const response = await renderInstaller(db, buildRequestContext(installPost(token, token, 'https://example.test', 'en-US')));
+    const options = batches[0].filter(({ sql }) => sql.includes('INSERT INTO typecho_options'));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('https://example.test/admin/login.php?installed=1');
+    expect(response.headers.get('location')).not.toContain('secure-pass-123');
+    expect(options.some(({ params }) => params[0] === 'adminLocale' && params[1] === 'en-US')).toBe(true);
   });
 
   it.each(['users', 'options', 'contents', 'metas', 'comments', 'relationships', 'fields'] as SiteTable[])(
